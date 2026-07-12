@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Macaco Fujão 🐵</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <h1>🐵 Macaco Fujão 🍌</h1>
+    <div id="canvas-wrap">
+      <canvas id="game" width="800" height="400"></canvas>
+
+      <div id="start-screen" class="overlay">
+        <h2>Desvie dos troncos e colete bananas!</h2>
+        <p>Aperte <b>ESPAÇO</b>, <b>↑</b> ou toque na tela para pular.</p>
+        <p>Pule perto de um cipó para agarrá-lo e atravessar rios. Dê <b>dois toques rápidos</b> para soltar!</p>
+        <button id="start-btn">Começar</button>
+      </div>
+
+      <div id="gameover-screen" class="overlay hidden">
+        <h2>Fim de jogo!</h2>
+        <p id="final-score"></p>
+        <button id="restart-btn">Jogar de novo</button>
+      </div>
+    </div>
+
+    <div id="hud">
+      <span id="score">Pontos: 0</span>
+      <span id="bananas">🍌 x 0</span>
+      <span id="highscore">Recorde: 0</span>
+    </div>
+
+    <div id="hunter-meter">
+      <span class="label">🏹 Caçador</span>
+      <div class="bar"><div id="hunter-fill"></div></div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
