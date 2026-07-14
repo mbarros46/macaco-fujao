@@ -29,6 +29,7 @@
   const JUMP_AIR_FRAMES = (2 * Math.abs(JUMP_FORCE)) / GRAVITY;
   const DOUBLE_TAP_WINDOW = 21; // frames (~350ms at 60fps) allowed between the two release taps
   const MIN_HAZARD_GAP = 40; // frames of spacing enforced between a log spawn and a banana spawn
+  const RIVER_LOG_CLEARANCE = 160; // px of clear runway required in front of the last log before a river can spawn
 
   let highScore = Number(localStorage.getItem("monkeyGameHighScore") || 0);
   highscoreEl.textContent = `Recorde: ${highScore}`;
@@ -130,7 +131,7 @@
   }
 
   function spawnBanana() {
-    const onGround = Math.random() < 0.5;
+    const onGround = Math.random() < 0.7;
     const y = onGround ? GROUND_Y - 30 : GROUND_Y - 110 - Math.random() * 30;
     bananas.push({ x: W + 20, y, w: 26, h: 26, collected: false });
   }
@@ -207,10 +208,17 @@
     // spawn rivers (rare set-piece; only one on screen at a time)
     riverTimer--;
     if (riverTimer <= 0 && rivers.length === 0) {
-      spawnRiver();
-      riverTimer = 450 + Math.random() * 300;
-      spawnTimer = Math.max(spawnTimer, 100);
-      bananaTimer = Math.max(bananaTimer, 80);
+      // don't drop the river right behind a log already on screen — that leaves no runway to land
+      // between jumping the log and needing to grab the vine, so the jump carries straight into the water
+      const lastLog = logs[logs.length - 1];
+      if (!lastLog || lastLog.x + lastLog.w < W - RIVER_LOG_CLEARANCE) {
+        spawnRiver();
+        riverTimer = 450 + Math.random() * 300;
+        spawnTimer = Math.max(spawnTimer, 100);
+        bananaTimer = Math.max(bananaTimer, 80);
+      } else {
+        riverTimer = 10; // retry shortly once the runway in front of the log clears
+      }
     }
 
     // move logs
@@ -283,7 +291,7 @@
         }
       }
     }
-    const closing = hunterSwimming ? -HUNTER_SWIM_PENALTY : 0.22 + score / 2200;
+    const closing = hunterSwimming ? -HUNTER_SWIM_PENALTY : 0.16 + score / 2200;
     hunterGap -= closing;
     if (hunterGap <= 0) {
       endGame("hunter");
@@ -298,16 +306,6 @@
     bananasEl.textContent = `🍌 x ${bananaCount}`;
   }
 
-  function roundRect(x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
-
   function shadeColor(hex, percent) {
     const num = parseInt(hex.slice(1), 16);
     let r = (num >> 16) + percent;
@@ -317,10 +315,6 @@
     g = Math.max(0, Math.min(255, g));
     b = Math.max(0, Math.min(255, b));
     return "#" + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
-  }
-
-  function limbEnd(x, y, angle, len) {
-    return { x: x - len * Math.sin(angle), y: y + len * Math.cos(angle) };
   }
 
   function drawSoftShadow(rx, ry) {
@@ -333,50 +327,6 @@
     ctx.ellipse(0, -1, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-  }
-
-  // cylinder-shaded limb, gradient perpendicular to its length, plus a rounded end pad (paw/boot)
-  function drawLimb3D(x, y, angle, len, width, color, padColor) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
-    const grad = ctx.createLinearGradient(-width / 2, 0, width / 2, 0);
-    grad.addColorStop(0, shadeColor(color, -35));
-    grad.addColorStop(0.45, shadeColor(color, 20));
-    grad.addColorStop(1, shadeColor(color, -55));
-    ctx.fillStyle = grad;
-    roundRect(-width / 2, 0, width, len, width / 2);
-    ctx.fill();
-    ctx.strokeStyle = shadeColor(color, -65);
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    if (padColor) {
-      ctx.fillStyle = padColor;
-      ctx.beginPath();
-      ctx.ellipse(0, len - 1, width / 2 + 1.5, width / 2.6, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = shadeColor(padColor, -50);
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-    }
-    ctx.restore();
-    return limbEnd(x, y, angle, len);
-  }
-
-  function furTicks(cx, cy, r, color, count) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2;
-      const x0 = cx + Math.cos(a) * (r - 2);
-      const y0 = cy + Math.sin(a) * (r - 2) * 0.9;
-      const x1 = cx + Math.cos(a) * (r + 3);
-      const y1 = cy + Math.sin(a) * (r + 3) * 0.9;
-      ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-      ctx.stroke();
-    }
   }
 
   function drawVineRope(ax, ay, hx, hy, armed) {
@@ -406,293 +356,129 @@
     ctx.restore();
   }
 
+  function drawLittleHand(x, y, color, outline) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    // finger creases
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 0.8;
+    for (const fx of [-2, 0, 2]) {
+      ctx.beginPath();
+      ctx.moveTo(x + fx, y + 3);
+      ctx.lineTo(x + fx, y + 4.8);
+      ctx.stroke();
+    }
+  }
+
+  // flat, bold-outlined "emoji sticker" style: no gradients/fur texture, just clean shapes
   function drawMonkey(m, frameNum) {
     const cx = m.x + m.w / 2;
     const baseY = m.y + m.h;
     const jumping = m.jumping;
     const swing = jumping ? 0 : Math.sin(frameNum * 0.35);
-    const FUR = "#6b4226";
-    const FUR_DARK = "#4a2c17";
-    const SKIN = "#e0b285";
+    const FUR = "#8a5a34";
+    const SKIN = "#f2c9a0";
+    const OUTLINE = "#3d2612";
 
     ctx.save();
     ctx.translate(cx, baseY);
 
     drawSoftShadow(15, 4.5);
 
-    // tail
-    const tailGrad = ctx.createLinearGradient(-8, -26, -14, -44);
-    tailGrad.addColorStop(0, shadeColor(FUR, -10));
-    tailGrad.addColorStop(1, shadeColor(FUR, -40));
-    ctx.strokeStyle = tailGrad;
-    ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-8, -26);
-    ctx.quadraticCurveTo(-22, -30 + swing * 3, -14, -42 + swing * 2);
-    ctx.stroke();
+    const headY = -24;
 
-    // back limbs (darker, further from light)
-    drawLimb3D(-6, -14, jumping ? -0.6 : swing * 0.6, 14, 7, shadeColor(FUR, -20), shadeColor(FUR_DARK, -10));
-    drawLimb3D(-8, -30, jumping ? 2.4 : -swing * 0.5 + 0.3, 13, 6, shadeColor(FUR, -20), SKIN);
-
-    // body (volumetric shading, light from upper-left)
-    const bodyGrad = ctx.createRadialGradient(-5, -30, 2, 0, -24, 17);
-    bodyGrad.addColorStop(0, shadeColor(FUR, 45));
-    bodyGrad.addColorStop(0.55, FUR);
-    bodyGrad.addColorStop(1, shadeColor(FUR, -35));
-    ctx.fillStyle = bodyGrad;
-    ctx.beginPath();
-    ctx.ellipse(0, -24, 12, 15, 0, 0, Math.PI * 2);
-    ctx.fill();
-    furTicks(0, -24, 13, shadeColor(FUR, -25), 22);
-
-    // belly patch
-    const bellyGrad = ctx.createRadialGradient(-1, -25, 1, 1, -21, 10);
-    bellyGrad.addColorStop(0, shadeColor(SKIN, 25));
-    bellyGrad.addColorStop(1, shadeColor(SKIN, -25));
-    ctx.fillStyle = bellyGrad;
-    ctx.beginPath();
-    ctx.ellipse(1, -21, 7, 10, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // front leg (lit side)
-    drawLimb3D(6, -14, jumping ? -1.9 : -swing * 0.6, 14, 7, FUR, shadeColor(FUR_DARK, 10));
-
-    // head
-    const headY = -40;
-    const headGrad = ctx.createRadialGradient(-4, headY - 4, 1, 0, headY, 12);
-    headGrad.addColorStop(0, shadeColor(FUR, 45));
-    headGrad.addColorStop(0.6, FUR);
-    headGrad.addColorStop(1, shadeColor(FUR, -35));
-    ctx.fillStyle = headGrad;
-    ctx.beginPath();
-    ctx.arc(0, headY, 11, 0, Math.PI * 2);
-    ctx.fill();
-    furTicks(0, headY, 11, shadeColor(FUR, -25), 18);
-
-    // ears
+    // ears (behind the head so only the outer half peeks out)
     for (const side of [-1, 1]) {
-      const earGrad = ctx.createRadialGradient(side * 9 - side * 1.5, headY - 5.5, 0.5, side * 9, headY - 4, 5);
-      earGrad.addColorStop(0, shadeColor(FUR, 30));
-      earGrad.addColorStop(1, shadeColor(FUR, -25));
-      ctx.fillStyle = earGrad;
+      ctx.fillStyle = FUR;
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.arc(side * 9, headY - 4, 5, 0, Math.PI * 2);
+      ctx.arc(side * 10, headY - 2, 5.5, 0, Math.PI * 2);
       ctx.fill();
-      const innerGrad = ctx.createRadialGradient(side * 9, headY - 4, 0.3, side * 9, headY - 4, 2.6);
-      innerGrad.addColorStop(0, shadeColor(SKIN, 20));
-      innerGrad.addColorStop(1, shadeColor(SKIN, -20));
-      ctx.fillStyle = innerGrad;
+      ctx.stroke();
+      ctx.fillStyle = SKIN;
       ctx.beginPath();
-      ctx.arc(side * 9, headY - 4, 2.6, 0, Math.PI * 2);
+      ctx.arc(side * 10, headY - 2, 2.8, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // face patch (muzzle)
-    const faceGrad = ctx.createRadialGradient(0, headY + 1, 1, 1, headY + 3, 8);
-    faceGrad.addColorStop(0, shadeColor(SKIN, 20));
-    faceGrad.addColorStop(1, shadeColor(SKIN, -20));
-    ctx.fillStyle = faceGrad;
+    // head (flat fur circle)
+    ctx.fillStyle = FUR;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.8;
     ctx.beginPath();
-    ctx.ellipse(1, headY + 3, 7, 6, 0, 0, Math.PI * 2);
+    ctx.arc(0, headY, 13, 0, Math.PI * 2);
     ctx.fill();
-
-    // brow ridge shadow
-    ctx.strokeStyle = "rgba(40,25,12,0.35)";
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.arc(1, headY - 1.5, 6.5, Math.PI * 1.08, Math.PI * 1.85);
     ctx.stroke();
 
-    // eyes: sclera + iris + pupil + highlight
-    for (const ex of [-2, 5]) {
-      ctx.fillStyle = "#f5ecd9";
+    // face patch (flat tan oval, emoji-style)
+    ctx.fillStyle = SKIN;
+    ctx.beginPath();
+    ctx.ellipse(0, headY + 3, 9, 8.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // eyebrows
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = "round";
+    for (const ex of [-4, 5]) {
       ctx.beginPath();
-      ctx.ellipse(ex, headY, 2.1, 1.9, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#3a2313";
-      ctx.beginPath();
-      ctx.arc(ex, headY, 1.4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(ex, headY - 1.5, 2.2, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+    }
+
+    // eyes: big flat circles + highlight, classic emoji look
+    for (const ex of [-4, 5]) {
       ctx.fillStyle = "#000";
       ctx.beginPath();
-      ctx.arc(ex, headY, 0.7, 0, Math.PI * 2);
+      ctx.arc(ex, headY + 1.5, 2.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#fff";
       ctx.beginPath();
-      ctx.arc(ex - 0.4, headY - 0.5, 0.35, 0, Math.PI * 2);
+      ctx.arc(ex - 0.7, headY + 0.6, 0.7, 0, Math.PI * 2);
       ctx.fill();
     }
 
     // nostrils
-    ctx.fillStyle = "#3a2313";
+    ctx.fillStyle = OUTLINE;
     ctx.beginPath();
-    ctx.ellipse(-1.3, headY + 3.5, 0.7, 0.5, 0.3, 0, Math.PI * 2);
-    ctx.ellipse(2.6, headY + 3.5, 0.7, 0.5, -0.3, 0, Math.PI * 2);
+    ctx.ellipse(-1.6, headY + 5.5, 0.7, 0.5, 0.3, 0, Math.PI * 2);
+    ctx.ellipse(2.6, headY + 5.5, 0.7, 0.5, -0.3, 0, Math.PI * 2);
     ctx.fill();
 
     // mouth
-    ctx.strokeStyle = "#3a2313";
-    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(1, headY + 5.5, 3, 0.15, Math.PI - 0.15);
+    ctx.arc(0.5, headY + 7, 3, 0.15, Math.PI - 0.15);
     ctx.stroke();
 
-    // front arm (lit side)
-    drawLimb3D(8, -30, jumping ? 2.9 : swing * 0.5 - 0.2, 13, 6, SKIN, shadeColor(SKIN, -15));
+    // little floating hands (no arms/body connecting them)
+    const bob = jumping ? -3 : swing * 2;
+    drawLittleHand(-19, headY + 9 - bob, SKIN, OUTLINE);
+    drawLittleHand(19, headY + 9 + bob, SKIN, OUTLINE);
 
     ctx.restore();
   }
 
-  function drawHunter(hx, groundY, frameNum, swimming) {
-    if (hx < -60 || hx > W + 60) return;
-    const swing = Math.sin(frameNum * 0.35);
-    const SHIRT = "#5a7d4a";
-    const PANTS = "#4a4232";
-    const SKIN = "#d8a274";
-    const BOOT = "#2a1e16";
-
-    ctx.save();
-    ctx.translate(hx, swimming ? groundY - 14 : groundY);
-
-    if (!swimming) drawSoftShadow(16, 5);
-
-    if (swimming) {
-      // ripples + splashing arm strokes instead of legs when swimming
-      ctx.strokeStyle = "rgba(255,255,255,0.55)";
-      ctx.lineWidth = 1.5;
-      for (let i = 0; i < 3; i++) {
-        const rr = 10 + i * 6 + (frameNum * 0.6) % 6;
-        ctx.globalAlpha = Math.max(0, 0.5 - i * 0.15);
-        ctx.beginPath();
-        ctx.ellipse(0, 2, rr, rr * 0.35, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      drawLimb3D(-6, -14, -0.9 + swing * 0.8, 15, 7, shadeColor(SHIRT, -10), SKIN);
-    } else {
-      // legs with boots
-      drawLimb3D(-5, -20, swing * 0.6, 18, 8, shadeColor(PANTS, -12), BOOT);
-      drawLimb3D(5, -20, -swing * 0.6, 18, 8, PANTS, BOOT);
-    }
-
-    // shirt (fabric shading + folds)
-    const shirtGrad = ctx.createLinearGradient(0, -46, 0, -18);
-    shirtGrad.addColorStop(0, shadeColor(SHIRT, 25));
-    shirtGrad.addColorStop(1, shadeColor(SHIRT, -30));
-    ctx.fillStyle = shirtGrad;
-    roundRect(-11, -46, 22, 28, 6);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(30,20,10,0.25)";
-    ctx.lineWidth = 1;
+  // net held in the hunter's floating hand: short handle + hooped mesh
+  function drawNet(handX, handY) {
+    const netCx = handX + 7;
+    const netCy = handY - 7;
+    ctx.strokeStyle = "#6b4b24";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(-8, -34);
-    ctx.quadraticCurveTo(0, -31, 8, -35);
-    ctx.moveTo(-9, -26);
-    ctx.quadraticCurveTo(0, -23, 9, -27);
-    ctx.stroke();
-    // chest pocket
-    ctx.strokeStyle = "rgba(30,20,10,0.4)";
-    ctx.strokeRect(-8, -40, 6, 6);
-    // belt with buckle
-    ctx.fillStyle = "#3b2a1a";
-    ctx.fillRect(-11, -22, 22, 4);
-    const buckleGrad = ctx.createLinearGradient(-2, -22, 2, -18);
-    buckleGrad.addColorStop(0, "#d8c37a");
-    buckleGrad.addColorStop(1, "#8a7638");
-    ctx.fillStyle = buckleGrad;
-    ctx.fillRect(-2.5, -21.5, 5, 3);
-
-    // back arm
-    drawLimb3D(-9, -42, -0.4 + swing * 0.15, 18, 6, shadeColor(SHIRT, -15), shadeColor(SKIN, -10));
-
-    // neck
-    ctx.fillStyle = shadeColor(SKIN, -15);
-    ctx.fillRect(-3, -48, 6, 5);
-
-    // head
-    const headGrad = ctx.createRadialGradient(-3, -55, 1, 0, -52, 10);
-    headGrad.addColorStop(0, shadeColor(SKIN, 30));
-    headGrad.addColorStop(0.6, SKIN);
-    headGrad.addColorStop(1, shadeColor(SKIN, -30));
-    ctx.fillStyle = headGrad;
-    ctx.beginPath();
-    ctx.arc(0, -52, 9, 0, Math.PI * 2);
-    ctx.fill();
-
-    // ear
-    ctx.fillStyle = shadeColor(SKIN, -10);
-    ctx.beginPath();
-    ctx.ellipse(8.5, -51, 1.8, 2.6, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // brow + eyes
-    ctx.strokeStyle = "rgba(40,25,12,0.5)";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(-5, -54.5);
-    ctx.lineTo(-1, -55);
-    ctx.moveTo(1.5, -55);
-    ctx.lineTo(5, -54.2);
-    ctx.stroke();
-    ctx.fillStyle = "#2b1a0e";
-    ctx.beginPath();
-    ctx.arc(-2.3, -52, 1.1, 0, Math.PI * 2);
-    ctx.arc(3, -52, 1.1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(-2.6, -52.4, 0.3, 0, Math.PI * 2);
-    ctx.arc(2.7, -52.4, 0.3, 0, Math.PI * 2);
-    ctx.fill();
-
-    // nose + mustache
-    ctx.strokeStyle = shadeColor(SKIN, -35);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0.5, -53);
-    ctx.lineTo(1, -49.5);
-    ctx.stroke();
-    ctx.fillStyle = "#4a3524";
-    ctx.beginPath();
-    ctx.ellipse(0.5, -48.6, 3.2, 1.1, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = shadeColor(SKIN, -40);
-    ctx.lineWidth = 0.8;
-    ctx.beginPath();
-    ctx.arc(0.5, -47.8, 2, 0.2, Math.PI - 0.2);
+    ctx.moveTo(handX, handY);
+    ctx.lineTo(netCx, netCy);
     ctx.stroke();
 
-    // safari hat with underside shadow on brim
-    const brimGrad = ctx.createLinearGradient(0, -61, 0, -57);
-    brimGrad.addColorStop(0, shadeColor("#8a6a3a", 15));
-    brimGrad.addColorStop(1, shadeColor("#8a6a3a", -35));
-    ctx.fillStyle = brimGrad;
-    ctx.beginPath();
-    ctx.ellipse(0, -59, 12.5, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-    const domeGrad = ctx.createRadialGradient(-3, -63, 1, 0, -61, 8);
-    domeGrad.addColorStop(0, shadeColor("#8a6a3a", 30));
-    domeGrad.addColorStop(1, shadeColor("#8a6a3a", -20));
-    ctx.fillStyle = domeGrad;
-    ctx.beginPath();
-    ctx.arc(0, -61, 7, Math.PI, 0);
-    ctx.fill();
-    ctx.fillStyle = "#5c4322";
-    ctx.fillRect(-7, -60.5, 14, 2);
-
-    // front arm reaching out, ending at hand
-    const hand = drawLimb3D(10, -42, -0.5, 16, 6, shadeColor(SHIRT, 10), SKIN);
-
-    // net (metallic rim + mesh) held at the hand
-    const netCx = hand.x + 6;
-    const netCy = hand.y - 4;
-    const rimGrad = ctx.createLinearGradient(netCx - 9, netCy - 9, netCx + 9, netCy + 9);
-    rimGrad.addColorStop(0, "#e8d9a8");
-    rimGrad.addColorStop(0.5, "#b89a5e");
-    rimGrad.addColorStop(1, "#7a6236");
-    ctx.strokeStyle = rimGrad;
+    ctx.strokeStyle = "#c9a24a";
     ctx.lineWidth = 2.2;
     ctx.beginPath();
     ctx.arc(netCx, netCy, 9, 0, Math.PI * 2);
@@ -709,6 +495,115 @@
       ctx.lineTo(netCx + i, netCy + 8);
       ctx.stroke();
     }
+  }
+
+  // flat, bold-outlined "emoji sticker" style, matching the monkey: just a head with floating hands
+  function drawHunter(hx, groundY, frameNum, swimming) {
+    if (hx < -60 || hx > W + 60) return;
+    const swing = Math.sin(frameNum * 0.35);
+    const SKIN = "#d8a274";
+    const OUTLINE = "#3d2612";
+    const HAT = "#c9a24a";
+
+    ctx.save();
+    ctx.translate(hx, swimming ? groundY - 14 : groundY);
+
+    if (!swimming) drawSoftShadow(16, 5);
+
+    const headY = -24;
+
+    if (swimming) {
+      // ripples instead of a splashing body, since there's no body/legs anymore
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 3; i++) {
+        const rr = 10 + i * 6 + (frameNum * 0.6) % 6;
+        ctx.globalAlpha = Math.max(0, 0.5 - i * 0.15);
+        ctx.beginPath();
+        ctx.ellipse(0, headY + 24, rr, rr * 0.35, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ears
+    for (const side of [-1, 1]) {
+      ctx.fillStyle = SKIN;
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(side * 10.5, headY, 2, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // head (flat skin circle)
+    ctx.fillStyle = SKIN;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(0, headY, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // eyebrows
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-7, headY - 3);
+    ctx.lineTo(-2, headY - 4);
+    ctx.moveTo(2, headY - 4);
+    ctx.lineTo(7, headY - 3);
+    ctx.stroke();
+
+    // eyes
+    for (const ex of [-4.5, 4.5]) {
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.arc(ex, headY, 1.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(ex - 0.6, headY - 0.6, 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // mustache
+    ctx.fillStyle = "#4a3524";
+    ctx.beginPath();
+    ctx.ellipse(0, headY + 5.5, 5, 1.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // mouth
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, headY + 7, 2.4, 0.2, Math.PI - 0.2);
+    ctx.stroke();
+
+    // safari hat
+    ctx.fillStyle = HAT;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.ellipse(0, headY - 10, 13.5, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, headY - 12, 8, Math.PI, 0);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = shadeColor(HAT, -30);
+    ctx.fillRect(-8, headY - 12.5, 16, 2.2);
+
+    // little floating hands, one holding the net
+    const bob = swing * 2;
+    drawLittleHand(-19, headY + 9 - bob, SKIN, OUTLINE);
+    const netHandX = 19;
+    const netHandY = headY + 9 + bob;
+    drawNet(netHandX, netHandY);
+    drawLittleHand(netHandX, netHandY, SKIN, OUTLINE);
 
     ctx.restore();
   }
