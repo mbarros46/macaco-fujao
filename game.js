@@ -30,14 +30,21 @@
   const DOUBLE_TAP_WINDOW = 21; // frames (~350ms at 60fps) allowed between the two release taps
   const MIN_HAZARD_GAP = 40; // frames of spacing enforced between a log spawn and a banana spawn
   const RIVER_LOG_CLEARANCE = 160; // px of clear runway required in front of the last log before a river can spawn
+  const ROCK_LOG_CLEARANCE = 160; // px of clear runway required in front of the last log before a rock can spawn
+  const ROCK_RIVER_CLEARANCE = 320; // px of clear runway required between a rock and a river (either order) — keeps the two big set-pieces well apart
+  const ROCK_DIG_GRACE = 50; // frames allowed to start digging (holding a seta para baixo) once the monkey reaches a rock
+  const ROCK_DIG_DURATION = 55; // frames of held down-arrow needed to dig all the way under a rock
+  const ROCK_DIG_DEPTH = 30; // px the monkey sinks into the ground while digging
 
   let highScore = Number(localStorage.getItem("monkeyGameHighScore") || 0);
   highscoreEl.textContent = `Recorde: ${highScore}`;
 
   let state = "idle"; // idle | playing | gameover
 
-  let monkey, logs, bananas, rivers, speed, score, bananaCount, spawnTimer, bananaTimer, riverTimer, frame;
+  let monkey, logs, bananas, rivers, rocks, speed, score, bananaCount, spawnTimer, bananaTimer, riverTimer, rockTimer, frame;
   let hunterGap, gameOverReason, hunterSwimming, hunterSwimFramesLeft, lastSwingTapFrame;
+  let activeRock, rockGraceLeft, digProgress, groundOffset;
+  let downHeld = false; // tracks the down-arrow being held, needed for the dig-to-clear-a-rock mechanic
 
   function resetGame() {
     monkey = {
@@ -50,21 +57,28 @@
       swinging: false,
       swingT: 0,
       swingDuration: 0,
+      digging: false,
     };
     logs = [];
     bananas = [];
     rivers = [];
+    rocks = [];
     speed = BASE_SPEED;
     score = 0;
     bananaCount = 0;
     spawnTimer = 60;
     bananaTimer = 120;
     riverTimer = 420;
+    rockTimer = 500 + Math.random() * 200;
     frame = 0;
     hunterGap = HUNTER_MAX_GAP;
     hunterSwimming = false;
     hunterSwimFramesLeft = 0;
     lastSwingTapFrame = -Infinity;
+    activeRock = null;
+    rockGraceLeft = 0;
+    digProgress = 0;
+    groundOffset = 0;
     gameOverReason = null;
     hunterMeterEl.classList.remove("critical");
     hunterFillEl.style.width = "0%";
@@ -72,7 +86,7 @@
 
   function jump() {
     if (state !== "playing") return;
-    if (!monkey.jumping && !monkey.swinging) {
+    if (!monkey.jumping && !monkey.swinging && !activeRock) {
       monkey.vy = JUMP_FORCE;
       monkey.jumping = true;
     }
@@ -119,6 +133,7 @@
       river: "Você caiu no rio! 🌊",
       vine: "O cipó arrebentou de tanto você ficar pendurado! 🍃",
       log: "Você bateu num tronco! 🪵",
+      rock: "A rocha bloqueou seu caminho! 🪨",
     };
     finalScoreEl.textContent = `${REASON_TEXT[reason]}  Pontos: ${Math.floor(score)}  |  🍌 x ${bananaCount}`;
     gameoverScreen.classList.remove("hidden");
@@ -128,6 +143,12 @@
     const h = 30 + Math.random() * 20;
     const w = 30 + Math.random() * 30;
     logs.push({ x: W + 20, y: GROUND_Y - h, w, h });
+  }
+
+  // rocks are a hard wall — too tall to jump, they force the monkey to stop and dig underneath
+  function spawnRock() {
+    const w = 55 + Math.random() * 20;
+    rocks.push({ x: W + 20, w, h: 46 });
   }
 
   function spawnBanana() {
@@ -189,49 +210,83 @@
       }
     }
 
-    // spawn logs
-    spawnTimer--;
-    if (spawnTimer <= 0) {
-      spawnLog();
-      spawnTimer = 70 - Math.min(30, Math.floor(score / 20)) + Math.random() * 40;
-      bananaTimer = Math.max(bananaTimer, MIN_HAZARD_GAP); // keep bananas from landing right next to the log
-    }
+    // everything below only advances while the monkey is free to run — reaching a rock freezes
+    // the whole world (except the hunter, who keeps closing in) until the rock is dug through
+    if (!activeRock) {
+      groundOffset = (groundOffset + speed) % 24;
 
-    // spawn bananas
-    bananaTimer--;
-    if (bananaTimer <= 0) {
-      spawnBanana();
-      bananaTimer = 90 + Math.random() * 90;
-      spawnTimer = Math.max(spawnTimer, MIN_HAZARD_GAP); // keep the next log from landing right next to the banana
-    }
-
-    // spawn rivers (rare set-piece; only one on screen at a time)
-    riverTimer--;
-    if (riverTimer <= 0 && rivers.length === 0) {
-      // don't drop the river right behind a log already on screen — that leaves no runway to land
-      // between jumping the log and needing to grab the vine, so the jump carries straight into the water
-      const lastLog = logs[logs.length - 1];
-      if (!lastLog || lastLog.x + lastLog.w < W - RIVER_LOG_CLEARANCE) {
-        spawnRiver();
-        riverTimer = 450 + Math.random() * 300;
-        spawnTimer = Math.max(spawnTimer, 100);
-        bananaTimer = Math.max(bananaTimer, 80);
-      } else {
-        riverTimer = 10; // retry shortly once the runway in front of the log clears
+      // spawn logs
+      spawnTimer--;
+      if (spawnTimer <= 0) {
+        spawnLog();
+        spawnTimer = 70 - Math.min(30, Math.floor(score / 20)) + Math.random() * 40;
+        bananaTimer = Math.max(bananaTimer, MIN_HAZARD_GAP); // keep bananas from landing right next to the log
       }
+
+      // spawn bananas
+      bananaTimer--;
+      if (bananaTimer <= 0) {
+        spawnBanana();
+        bananaTimer = 90 + Math.random() * 90;
+        spawnTimer = Math.max(spawnTimer, MIN_HAZARD_GAP); // keep the next log from landing right next to the banana
+      }
+
+      // spawn rivers (rare set-piece; only one on screen at a time)
+      riverTimer--;
+      if (riverTimer <= 0 && rivers.length === 0) {
+        // don't drop the river right behind a log already on screen — that leaves no runway to land
+        // between jumping the log and needing to grab the vine, so the jump carries straight into the water
+        const lastLog = logs[logs.length - 1];
+        // keep rivers and rocks well apart — two big set-pieces back-to-back would be unfair
+        const lastRock = rocks[rocks.length - 1];
+        const logClear = !lastLog || lastLog.x + lastLog.w < W - RIVER_LOG_CLEARANCE;
+        const rockClear = !lastRock || lastRock.x + lastRock.w < W - ROCK_RIVER_CLEARANCE;
+        if (logClear && rockClear) {
+          spawnRiver();
+          riverTimer = 450 + Math.random() * 300;
+          spawnTimer = Math.max(spawnTimer, 100);
+          bananaTimer = Math.max(bananaTimer, 80);
+          rockTimer = Math.max(rockTimer, 200);
+        } else {
+          riverTimer = 10; // retry shortly once the runway ahead clears
+        }
+      }
+
+      // spawn rocks (rare set-piece; only one on screen at a time)
+      rockTimer--;
+      if (rockTimer <= 0 && rocks.length === 0) {
+        // same runway concern as rivers: don't drop a rock right behind a log, or there's no room to stop
+        const lastLog = logs[logs.length - 1];
+        const lastRiver = rivers[rivers.length - 1];
+        const logClear = !lastLog || lastLog.x + lastLog.w < W - ROCK_LOG_CLEARANCE;
+        const riverClear = !lastRiver || lastRiver.x + lastRiver.w < W - ROCK_RIVER_CLEARANCE;
+        if (logClear && riverClear) {
+          spawnRock();
+          rockTimer = 500 + Math.random() * 300;
+          spawnTimer = Math.max(spawnTimer, 100);
+          bananaTimer = Math.max(bananaTimer, 80);
+          riverTimer = Math.max(riverTimer, 200);
+        } else {
+          rockTimer = 10; // retry shortly once the runway ahead clears
+        }
+      }
+
+      // move logs
+      for (const log of logs) log.x -= speed;
+      logs = logs.filter((l) => l.x + l.w > -10);
+
+      // move bananas
+      for (const b of bananas) b.x -= speed;
+      bananas = bananas.filter((b) => b.x + b.w > -10 && !b.collected);
+
+      // move rivers (kept around well past the screen edge so a far-behind hunter can still reach them)
+      for (const river of rivers) river.x -= speed;
+      rivers = rivers.filter((r) => r.x + r.w > -HUNTER_MAX_GAP - 60);
+
+      // move rocks
+      for (const rock of rocks) rock.x -= speed;
+      rocks = rocks.filter((r) => r.x + r.w > -10);
     }
-
-    // move logs
-    for (const log of logs) log.x -= speed;
-    logs = logs.filter((l) => l.x + l.w > -10);
-
-    // move bananas
-    for (const b of bananas) b.x -= speed;
-    bananas = bananas.filter((b) => b.x + b.w > -10 && !b.collected);
-
-    // move rivers (kept around well past the screen edge so a far-behind hunter can still reach them)
-    for (const river of rivers) river.x -= speed;
-    rivers = rivers.filter((r) => r.x + r.w > -HUNTER_MAX_GAP - 60);
 
     // collisions
     const hitbox = { x: monkey.x + 6, y: monkey.y + 6, w: monkey.w - 12, h: monkey.h - 12 };
@@ -241,6 +296,53 @@
         return;
       }
     }
+
+    // rocks: a boulder is too tall to jump over. Crashing into it airborne is a game over,
+    // but reaching it on the ground stops the monkey so the player can dig underneath instead
+    if (!activeRock) {
+      for (const rock of rocks) {
+        const tallZone = { x: rock.x, y: GROUND_Y - 170, w: rock.w, h: 170 };
+        if (rectsOverlap(hitbox, tallZone)) {
+          if (monkey.jumping || monkey.swinging) {
+            endGame("rock");
+            return;
+          }
+          activeRock = rock;
+          rockGraceLeft = ROCK_DIG_GRACE;
+          digProgress = 0;
+          monkey.digging = false;
+          break;
+        }
+      }
+    }
+
+    // digging: the grace window requires holding the down arrow before it runs out, then holding
+    // it again drives the dig progress — releasing simply pauses at the current depth
+    if (activeRock) {
+      if (!monkey.digging) {
+        if (downHeld) {
+          monkey.digging = true;
+        } else {
+          rockGraceLeft--;
+          if (rockGraceLeft <= 0) {
+            endGame("rock");
+            return;
+          }
+        }
+      }
+      if (monkey.digging && downHeld) {
+        digProgress++;
+        monkey.y = GROUND_Y - monkey.h + Math.min(ROCK_DIG_DEPTH, (digProgress / ROCK_DIG_DURATION) * ROCK_DIG_DEPTH);
+        if (digProgress >= ROCK_DIG_DURATION) {
+          rocks = rocks.filter((r) => r !== activeRock);
+          activeRock = null;
+          monkey.digging = false;
+          monkey.y = GROUND_Y - monkey.h;
+          digProgress = 0;
+        }
+      }
+    }
+
     for (const b of bananas) {
       if (!b.collected && rectsOverlap(hitbox, b)) {
         b.collected = true;
@@ -620,8 +722,7 @@
     ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
     ctx.fillStyle = "#5c7d3a";
     for (let i = 0; i < W; i += 24) {
-      const offset = (frame * (state === "playing" ? speed : 0)) % 24;
-      ctx.fillRect(i - offset, GROUND_Y, 12, 6);
+      ctx.fillRect(i - groundOffset, GROUND_Y, 12, 6);
     }
 
     // rivers
@@ -654,6 +755,17 @@
       ctx.restore();
     }
 
+    // rocks
+    for (const rock of rocks) {
+      ctx.save();
+      ctx.translate(rock.x + rock.w / 2, GROUND_Y - rock.h / 2 + 6);
+      ctx.font = `${rock.h + 32}px serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("🪨", 0, 0);
+      ctx.restore();
+    }
+
     // bananas
     ctx.font = "26px serif";
     ctx.textAlign = "center";
@@ -682,8 +794,45 @@
       drawVineRope(cx, 0, cx, monkey.y + monkey.h / 2, armed);
     }
 
-    // monkey
-    drawMonkey(monkey, frame);
+    // monkey (clipped at ground level while digging, so it visually sinks into the earth)
+    if (monkey.digging) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, W, GROUND_Y);
+      ctx.clip();
+      drawMonkey(monkey, frame);
+      ctx.restore();
+
+      // dust kicked up around the dig site
+      const dustX = monkey.x + monkey.w / 2;
+      ctx.fillStyle = "rgba(120,90,50,0.5)";
+      for (let i = 0; i < 3; i++) {
+        const a = frame * 0.3 + i * 2;
+        ctx.beginPath();
+        ctx.ellipse(dustX + Math.cos(a) * 14, GROUND_Y - 2 + Math.sin(a * 1.7) * 3, 5, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      drawMonkey(monkey, frame);
+    }
+
+    // dig progress / grace-window hint while stuck at a rock
+    if (activeRock) {
+      const barX = monkey.x - 10;
+      const barY = monkey.y - 14;
+      const barW = 60;
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fillRect(barX, barY, barW, 6);
+      if (monkey.digging) {
+        ctx.fillStyle = "#d9c23c";
+        ctx.fillRect(barX, barY, barW * (digProgress / ROCK_DIG_DURATION), 6);
+      } else {
+        ctx.fillStyle = "#fff";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("⬇ cave!", monkey.x + monkey.w / 2, barY - 6);
+      }
+    }
 
     // danger vignette when hunter is close
     if (state === "playing" && hunterGap < 100) {
@@ -709,7 +858,14 @@
     if (e.code === "Space" || e.code === "ArrowUp") {
       e.preventDefault();
       handleAction();
+    } else if (e.code === "ArrowDown") {
+      e.preventDefault();
+      downHeld = true;
     }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (e.code === "ArrowDown") downHeld = false;
   });
 
   canvas.addEventListener("pointerdown", handleAction);
