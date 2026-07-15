@@ -360,12 +360,12 @@
       }
     }
 
-    // rocks: a boulder is too tall to jump over. Crashing into it airborne is a game over,
+    // rocks: a boulder can be jumped over if the jump is high enough,
     // but reaching it on the ground stops the monkey so the player can dig underneath instead
     if (!activeRock) {
       for (const rock of rocks) {
-        const tallZone = { x: rock.x, y: GROUND_Y - 170, w: rock.w, h: 170 };
-        if (rectsOverlap(hitbox, tallZone)) {
+        const rockZone = { x: rock.x, y: GROUND_Y - rock.h, w: rock.w, h: rock.h };
+        if (rectsOverlap(hitbox, rockZone)) {
           if (monkey.jumping || monkey.swinging) {
             endGame("rock");
             return;
