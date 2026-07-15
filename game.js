@@ -155,14 +155,10 @@
   // releasing the vine takes two taps within DOUBLE_TAP_WINDOW frames of each other;
   // miss the window (or never tap) and the swing just keeps hanging while the hunter closes in
   function handleSwingRelease() {
-    if (frame - lastSwingTapFrame <= DOUBLE_TAP_WINDOW) {
-      monkey.swinging = false;
-      monkey.vy = 0; // resumes falling naturally next frame from wherever the release happened
-      lastSwingTapFrame = -Infinity;
-      sfx.vineRelease();
-    } else {
-      lastSwingTapFrame = frame;
-    }
+    monkey.swinging = false;
+    monkey.vy = 0; // resumes falling naturally next frame from wherever the release happened
+    lastSwingTapFrame = -Infinity;
+    sfx.vineRelease();
   }
 
   function handleAction() {
