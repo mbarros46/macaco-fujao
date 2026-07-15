@@ -17,6 +17,65 @@
 
   const hunterFillEl = document.getElementById("hunter-fill");
   const hunterMeterEl = document.getElementById("hunter-meter");
+  const digBtn = document.getElementById("dig-btn");
+
+  // --- áudio sintetizado (Web Audio API) — sem arquivos de som externos ---
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = AudioCtor ? new AudioCtor() : null;
+
+  function unlockAudio() {
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  }
+
+  function playTone({ freq = 440, duration = 0.15, type = "sine", startFreq = null, endFreq = null, volume = 0.25 }) {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    if (startFreq && endFreq) {
+      osc.frequency.setValueAtTime(startFreq, now);
+      osc.frequency.exponentialRampToValueAtTime(endFreq, now + duration);
+    } else {
+      osc.frequency.setValueAtTime(freq, now);
+    }
+    gain.gain.setValueAtTime(volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  function playNoiseBurst(duration = 0.2, volume = 0.2) {
+    if (!audioCtx) return;
+    const bufferSize = Math.floor(audioCtx.sampleRate * duration);
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+    noise.connect(gain).connect(audioCtx.destination);
+    noise.start();
+  }
+
+  const sfx = {
+    jump: () => playTone({ startFreq: 300, endFreq: 650, duration: 0.14, type: "square", volume: 0.15 }),
+    banana: () => {
+      playTone({ startFreq: 500, endFreq: 900, duration: 0.1, type: "triangle", volume: 0.2 });
+      setTimeout(() => playTone({ startFreq: 700, endFreq: 1100, duration: 0.09, type: "triangle", volume: 0.15 }), 55);
+    },
+    vineGrab: () => playTone({ startFreq: 260, endFreq: 420, duration: 0.08, type: "sine", volume: 0.15 }),
+    vineRelease: () => playTone({ startFreq: 420, endFreq: 260, duration: 0.08, type: "sine", volume: 0.15 }),
+    digTick: () => playTone({ freq: 140 + Math.random() * 50, duration: 0.05, type: "square", volume: 0.08 }),
+    splash: () => {
+      playTone({ startFreq: 220, endFreq: 60, duration: 0.3, type: "sine", volume: 0.22 });
+      playNoiseBurst(0.18, 0.15);
+    },
+    hit: () => playTone({ startFreq: 200, endFreq: 50, duration: 0.28, type: "sawtooth", volume: 0.28 }),
+    gameover: () => playTone({ startFreq: 400, endFreq: 80, duration: 0.5, type: "sawtooth", volume: 0.25 }),
+  };
 
   const GRAVITY = 0.55;
   const JUMP_FORCE = -12.5;
@@ -89,6 +148,7 @@
     if (!monkey.jumping && !monkey.swinging && !activeRock) {
       monkey.vy = JUMP_FORCE;
       monkey.jumping = true;
+      sfx.jump();
     }
   }
 
@@ -99,12 +159,14 @@
       monkey.swinging = false;
       monkey.vy = 0; // resumes falling naturally next frame from wherever the release happened
       lastSwingTapFrame = -Infinity;
+      sfx.vineRelease();
     } else {
       lastSwingTapFrame = frame;
     }
   }
 
   function handleAction() {
+    unlockAudio();
     if (state === "idle") startGame();
     else if (state === "playing") {
       if (monkey.swinging) handleSwingRelease();
@@ -123,6 +185,11 @@
   function endGame(reason) {
     state = "gameover";
     gameOverReason = reason;
+    downHeld = false;
+    if (digBtn) digBtn.classList.add("hidden");
+    if (reason === "river") sfx.splash();
+    else sfx.hit();
+    setTimeout(() => sfx.gameover(), 180);
     if (score > highScore) {
       highScore = score;
       localStorage.setItem("monkeyGameHighScore", String(highScore));
@@ -332,6 +399,7 @@
       }
       if (monkey.digging && downHeld) {
         digProgress++;
+        if (digProgress % 6 === 0) sfx.digTick();
         monkey.y = GROUND_Y - monkey.h + Math.min(ROCK_DIG_DEPTH, (digProgress / ROCK_DIG_DURATION) * ROCK_DIG_DEPTH);
         if (digProgress >= ROCK_DIG_DURATION) {
           rocks = rocks.filter((r) => r !== activeRock);
@@ -349,6 +417,7 @@
         bananaCount++;
         score += 10;
         hunterGap = Math.min(HUNTER_MAX_GAP, hunterGap + HUNTER_BANANA_BONUS);
+        sfx.banana();
       }
     }
 
@@ -364,6 +433,7 @@
           monkey.swingT = 0;
           monkey.swingDuration = river.swingDuration;
           monkey.swingStartY = monkey.y;
+          sfx.vineGrab();
         }
       }
       // top edge raised above GROUND_Y so it actually reaches the (inset) hitbox when grounded —
@@ -713,6 +783,8 @@
   function draw() {
     ctx.clearRect(0, 0, W, H);
 
+    if (digBtn) digBtn.classList.toggle("hidden", !(state === "playing" && activeRock));
+
     // sky gradient already via CSS; draw sun
     ctx.font = "40px serif";
     ctx.fillText("☀️", W - 80, 60);
@@ -869,6 +941,16 @@
   });
 
   canvas.addEventListener("pointerdown", handleAction);
+
+  // botão de cavar dedicado para touch — sem ele, no celular fica travado numa rocha
+  if (digBtn) {
+    const press = (e) => { e.preventDefault(); unlockAudio(); downHeld = true; };
+    const release = (e) => { e.preventDefault(); downHeld = false; };
+    digBtn.addEventListener("pointerdown", press);
+    digBtn.addEventListener("pointerup", release);
+    digBtn.addEventListener("pointerleave", release);
+    digBtn.addEventListener("pointercancel", release);
+  }
 
   startBtn.addEventListener("click", startGame);
   restartBtn.addEventListener("click", startGame);
