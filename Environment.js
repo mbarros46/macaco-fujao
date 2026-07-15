@@ -1,4 +1,4 @@
-import { W, H, GROUND_Y, JUMP_AIR_FRAMES, MIN_HAZARD_GAP, RIVER_LOG_CLEARANCE, ROCK_LOG_CLEARANCE, ROCK_RIVER_CLEARANCE, ROCK_DIG_GRACE, HUNTER_MAX_GAP, HUNTER_BANANA_BONUS } from "./Config.js";
+import { W, H, GROUND_Y, JUMP_AIR_FRAMES, MIN_HAZARD_GAP, RIVER_LOG_CLEARANCE, ROCK_LOG_CLEARANCE, ROCK_RIVER_CLEARANCE, ROCK_DIG_GRACE, HUNTER_MAX_GAP, HUNTER_BANANA_BONUS, PHASE_2_SCORE, PHASE_3_SCORE } from "./Config.js";
 import { drawVineRope } from "./Helpers.js";
 
 function rectsOverlap(a, b) {
@@ -39,10 +39,19 @@ export class Environment {
     this.rocks.push({ x: W + 20, w, h: 46 });
   }
 
-  spawnItem() {
+  spawnItem(score) {
     const onGround = Math.random() < 0.7;
     const y = onGround ? GROUND_Y - 30 : GROUND_Y - 110 - Math.random() * 30;
     
+    let heartMax = 1;
+    if (score >= PHASE_2_SCORE && score < PHASE_3_SCORE) heartMax = 2;
+
+    const currentHearts = this.powerups.filter(p => p.type === "heart" && !p.collected).length;
+    if (currentHearts < heartMax && Math.random() < 0.02) { // 2% chance per tick to spawn heart if under max
+        this.powerups.push({ x: W + 20, y: y - 5, w: 26, h: 26, type: "heart", collected: false });
+        return;
+    }
+
     // 5% chance of spawning a power-up instead of a normal banana
     const isPowerUp = Math.random() < 0.05;
     if (isPowerUp) {
@@ -79,7 +88,7 @@ export class Environment {
 
     this.bananaTimer--;
     if (this.bananaTimer <= 0) {
-      this.spawnItem();
+      this.spawnItem(score);
       this.bananaTimer = 90 + Math.random() * 90;
       this.spawnTimer = Math.max(this.spawnTimer, MIN_HAZARD_GAP);
     }
@@ -197,6 +206,13 @@ export class Environment {
             setTimeout(() => sfx.jump(), 90);
           }
           return "spring";
+        } else if (p.type === "heart") {
+          // Heart grants an extra life in game loop
+          if (sfx) {
+             sfx.banana(); // Maybe a specific sound later, for now banana sound
+             setTimeout(() => sfx.banana(), 50);
+          }
+          return "heart";
         }
       }
     }
@@ -226,11 +242,23 @@ export class Environment {
     }
   }
 
-  draw(ctx, frame, speed, activeRock, groundOffset) {
+  draw(ctx, frame, speed, activeRock, groundOffset, score) {
     // 1. Ground & Parallax Offset
-    ctx.fillStyle = "#7a9e4f";
+    let groundTop, groundAccent;
+    if (score < 700) { // PHASE_2_SCORE
+      groundTop = "#7a9e4f";
+      groundAccent = "#5c7d3a";
+    } else if (score < 1400) { // PHASE_3_SCORE
+      groundTop = "#9c3b2b"; // Mars red
+      groundAccent = "#6b2318";
+    } else {
+      groundTop = "#999999"; // Office carpet/floor
+      groundAccent = "#777777";
+    }
+
+    ctx.fillStyle = groundTop;
     ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-    ctx.fillStyle = "#5c7d3a";
+    ctx.fillStyle = groundAccent;
     for (let i = 0; i < W; i += 24) {
       ctx.fillRect(i - groundOffset, GROUND_Y, 12, 6);
     }
@@ -326,6 +354,11 @@ export class Environment {
         ctx.fillStyle = "#ff3366";
         ctx.textAlign = "center";
         ctx.fillText("JUMP", 0, -16);
+      } else if (p.type === "heart") {
+        ctx.font = "24px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("❤️", 0, 0);
       }
       ctx.restore();
     }

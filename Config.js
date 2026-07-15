@@ -20,6 +20,6 @@ export const ROCK_DIG_GRACE = 50;
 export const ROCK_DIG_DURATION = 55;
 export const ROCK_DIG_DEPTH = 30;
 
-export const CLIMATE_SUNSET_START = 800;
-export const CLIMATE_NIGHT_START = 2000;
-export const CLIMATE_COSMIC_START = 3500;
+export const PHASE_2_SCORE = 700;
+export const PHASE_3_SCORE = 1400;
+export const VICTORY_SCORE = 2100;

@@ -24,6 +24,10 @@ export class Player {
     this.jumpBufferFramesLeft = 0;
     this.superJumpTimer = 0;
     this.wasGroundedLastFrame = true;
+    this.invisible = false;
+    this.floatAngle = 0;
+    this.lives = 1;
+    this.invulnerableTimer = 0;
   }
 
   isGrounded() {
@@ -50,16 +54,21 @@ export class Player {
     this.superJumpTimer = 600; // 10 seconds at 60fps
   }
 
-  update(activeRock, frame, endGame, sfx) {
-    // Decrement jump buffer
-    if (this.jumpBufferFramesLeft > 0) {
-      this.jumpBufferFramesLeft--;
+  takeDamage(endGame, reason) {
+    if (this.invulnerableTimer > 0) return; // Ignore damage if invulnerable
+    this.lives--;
+    if (this.lives <= 0) {
+      endGame(reason);
+    } else {
+      this.invulnerableTimer = 90; // 1.5 seconds of invulnerability
     }
+  }
 
-    // Decrement super jump timer
-    if (this.superJumpTimer > 0) {
-      this.superJumpTimer--;
-    }
+  update(activeRock, frame, endGame, sfx) {
+    // Decrement timers
+    if (this.invulnerableTimer > 0) this.invulnerableTimer--;
+    if (this.jumpBufferFramesLeft > 0) this.jumpBufferFramesLeft--;
+    if (this.superJumpTimer > 0) this.superJumpTimer--;
 
     // Coyote time tracking
     const grounded = this.isGrounded();
@@ -106,6 +115,8 @@ export class Player {
   }
 
   draw(ctx, frameNum) {
+    if (this.invisible) return;
+    if (this.invulnerableTimer > 0 && Math.floor(frameNum / 4) % 2 === 0) return;
     const cx = this.x + this.w / 2;
     const baseY = this.y + this.h;
     const jumping = this.jumping;
@@ -118,7 +129,11 @@ export class Player {
     const CHEST = "#525259";
 
     ctx.save();
-    ctx.translate(cx, baseY);
+    ctx.translate(cx, baseY - this.h / 2);
+    if (this.floatAngle) {
+      ctx.rotate(this.floatAngle);
+    }
+    ctx.translate(0, this.h / 2);
 
     drawSoftShadow(ctx, 16, 5);
 
@@ -140,47 +155,38 @@ export class Player {
     const headY = -25;
     const bodyY = -9;
 
-    // 1. Shoulders & Arms (stocky, muscular gorilla shoulders)
+    // 1. Left Arm (behind body)
+    const leftArmBob = -1 * swing * 2.5;
+    ctx.save();
+    ctx.translate(-4, bodyY - 4);
     ctx.fillStyle = FUR;
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 2;
-    for (const side of [-1, 1]) {
-      const armBob = side * swing * 2.5;
-      ctx.save();
-      ctx.translate(side * 14, bodyY - 4);
-      // Large shoulder joint
-      ctx.beginPath();
-      ctx.arc(0, 0, 8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // Muscular forearm hanging down
-      ctx.beginPath();
-      ctx.ellipse(0, 7 + armBob, 5.5, 9, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // Hand fist
-      drawLittleHand(ctx, 0, 15 + armBob, SKIN, OUTLINE);
-      ctx.restore();
-    }
+    // Shoulder
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Forearm
+    ctx.beginPath(); ctx.ellipse(0, 7 + leftArmBob, 4.5, 8, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    drawLittleHand(ctx, 0, 14 + leftArmBob, SKIN, OUTLINE);
+    ctx.restore();
 
     // 2. Thick stocky neck / back fur
     ctx.fillStyle = FUR;
     ctx.beginPath();
-    ctx.ellipse(0, headY + 5, 12, 8, 0, 0, Math.PI * 2);
+    ctx.ellipse(-3, headY + 5, 10, 8, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // 3. Body (Robust muscular chest)
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.ellipse(0, bodyY, 15, 12.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, bodyY, 14, 12.5, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Gorilla Chest Plate (abs/muscles line)
+    // Gorilla Chest Plate (abs/muscles line) - shifted right
     ctx.fillStyle = CHEST;
     ctx.beginPath();
-    ctx.ellipse(0, bodyY + 1.5, 10, 8.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(3, bodyY + 1.5, 8, 8.5, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
@@ -188,83 +194,91 @@ export class Player {
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, bodyY - 6.5);
-    ctx.lineTo(0, bodyY + 9.5);
+    ctx.moveTo(3, bodyY - 6.5);
+    ctx.lineTo(3, bodyY + 9.5);
     ctx.stroke();
 
-    // 4. Head (sagittal crest style, slightly elongated top)
+    // 4. Head (sagittal crest style)
     ctx.fillStyle = FUR;
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    // Top head crest shape
     ctx.moveTo(-9, headY);
     ctx.bezierCurveTo(-11, headY - 14, 11, headY - 14, 9, headY);
     ctx.arc(0, headY, 11, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // 5. Gorilla Face Mask (prominent grey face plate, looking forward)
+    // 5. Gorilla Face Mask - shifted right
     ctx.fillStyle = SKIN;
     ctx.beginPath();
-    ctx.ellipse(0, headY + 2.5, 8.5, 7.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(5, headY + 2.5, 6.5, 7.5, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Eyebrow ridge (flat, strong bar)
+    // Eyebrow ridge - shifted right
     ctx.fillStyle = FUR;
-    ctx.fillRect(-7.5, headY - 3, 15, 2.5);
+    ctx.fillRect(0, headY - 3, 11, 2.5);
 
-    // Front-facing Eyes
-    for (const ex of [-3.8, 3.8]) {
-      ctx.fillStyle = "#000";
-      ctx.beginPath();
-      ctx.arc(ex, headY + 1.2, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(ex - 0.6, headY + 0.6, 0.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // Right-facing Eye
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.arc(7.5, headY + 1.2, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(8, headY + 0.6, 0.6, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Flat prominent nose
+    // Nose
     ctx.fillStyle = OUTLINE;
     ctx.beginPath();
-    ctx.ellipse(-1.8, headY + 4.5, 1.2, 1, 0, 0, Math.PI * 2);
-    ctx.ellipse(1.8, headY + 4.5, 1.2, 1, 0, 0, Math.PI * 2);
+    ctx.ellipse(8, headY + 4.5, 1.2, 1, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Mouth (thin serious/determined line)
+    // Mouth
     ctx.strokeStyle = OUTLINE;
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(0, headY + 8, 3.5, 0.4, Math.PI - 0.4);
+    ctx.arc(5, headY + 8, 3.5, 0.1, Math.PI - 0.7);
     ctx.stroke();
 
-    // 6. Ears
-    for (const side of [-1, 1]) {
-      ctx.fillStyle = FUR;
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(side * 11.5, headY - 2, 2.8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
+    // 6. Ear (facing right, ear is on left side of face)
+    ctx.fillStyle = FUR;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(-4, headY - 1, 2.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
 
-    // 7. Feet (thick stout feet at bottom)
+    // 7. Right Arm (in front)
+    const rightArmBob = 1 * swing * 2.5;
+    ctx.save();
+    ctx.translate(6, bodyY - 4);
+    ctx.fillStyle = FUR;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 2;
+    // Shoulder
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Forearm
+    ctx.beginPath(); ctx.ellipse(0, 7 + rightArmBob, 5.5, 9, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    drawLittleHand(ctx, 0, 15 + rightArmBob, SKIN, OUTLINE);
+    ctx.restore();
+
+    // 8. Feet
     const footY = -1.2;
     const footBob = Math.abs(swing) * 2.2;
-    for (const side of [-1, 1]) {
-      const fx = side * 8.5;
-      const fy = footY - (side === 1 ? footBob : 2.2 - footBob);
-      ctx.fillStyle = SKIN;
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.ellipse(fx, fy, 6, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
+    // Left foot (behind)
+    ctx.fillStyle = SKIN;
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.ellipse(-4, footY - (2.2 - footBob), 6, 4, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Right foot (front)
+    ctx.beginPath();
+    ctx.ellipse(5, footY - footBob, 6, 4, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
 
     // Super jump indicator (Spring/Mola floating overlay)
     if (this.superJumpTimer > 0) {

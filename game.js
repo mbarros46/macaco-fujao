@@ -1,4 +1,4 @@
-import { W, H, GROUND_Y, BASE_SPEED, HUNTER_MAX_GAP, CLIMATE_SUNSET_START, CLIMATE_NIGHT_START, CLIMATE_COSMIC_START, ROCK_DIG_GRACE, ROCK_DIG_DURATION, ROCK_DIG_DEPTH } from "./Config.js";
+import { W, H, GROUND_Y, BASE_SPEED, HUNTER_MAX_GAP, PHASE_2_SCORE, PHASE_3_SCORE, ROCK_DIG_GRACE, ROCK_DIG_DURATION, ROCK_DIG_DEPTH, VICTORY_SCORE } from "./Config.js";
 import { lerpColor, drawVineRope } from "./Helpers.js";
 import { Player } from "./Player.js";
 import { Hunter } from "./Hunter.js";
@@ -38,6 +38,9 @@ nebCtx.fill();
   const finalScoreEl = document.getElementById("final-score");
   const startBtn = document.getElementById("start-btn");
   const restartBtn = document.getElementById("restart-btn");
+  const victoryScreen = document.getElementById("victory-screen");
+  const victoryScoreEl = document.getElementById("victory-score");
+  const restartVictoryBtn = document.getElementById("restart-victory-btn");
 
   const hunterFillEl = document.getElementById("hunter-fill");
   const hunterMeterEl = document.getElementById("hunter-meter");
@@ -101,6 +104,14 @@ nebCtx.fill();
     },
     hit: () => playTone({ startFreq: 200, endFreq: 50, duration: 0.28, type: "sawtooth", volume: 0.28 }),
     gameover: () => playTone({ startFreq: 400, endFreq: 80, duration: 0.5, type: "sawtooth", volume: 0.25 }),
+    victory: () => {
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      notes.forEach((freq, idx) => {
+        setTimeout(() => {
+          playTone({ freq, duration: 0.25, type: "triangle", volume: 0.25 });
+        }, idx * 120);
+      });
+    }
   };
 
   let highScore = Number(localStorage.getItem("monkeyGameHighScore") || 0);
@@ -189,6 +200,9 @@ nebCtx.fill();
     hunterFillEl.style.width = "0%";
     initBackgroundElements();
     shakeTime = 0;
+
+    victoryScreen.classList.add("hidden");
+    ufo.rescueStage = null;
   }
 
   function handleAction() {
@@ -205,7 +219,23 @@ nebCtx.fill();
     state = "playing";
     startScreen.classList.add("hidden");
     gameoverScreen.classList.add("hidden");
+    victoryScreen.classList.add("hidden");
     requestAnimationFrame(loop);
+  }
+
+  function handleDamage(reason) {
+    if (player.invulnerableTimer > 0) return;
+    
+    player.lives--;
+    if (player.lives <= 0) {
+      endGame(reason);
+    } else {
+      player.invulnerableTimer = 90;
+      triggerScreenShake();
+      sfx.hit(); // Standard hit sound
+      // Push hunter back to give breathing room
+      hunter.gap = Math.min(HUNTER_MAX_GAP, hunter.gap + 150);
+    }
   }
 
   function endGame(reason) {
@@ -248,7 +278,7 @@ nebCtx.fill();
     }
 
     // 3. Shooting stars
-    if (score >= CLIMATE_SUNSET_START && Math.random() < 0.008 && shootingStars.length < 2) {
+    if (score >= PHASE_2_SCORE && score < PHASE_3_SCORE && Math.random() < 0.008 && shootingStars.length < 2) {
       shootingStars.push({
         x: Math.random() * (W - 100),
         y: Math.random() * 80,
@@ -276,51 +306,53 @@ nebCtx.fill();
     }
 
     // 5. Dragon (Easter egg)
-    if (!dragon.active) {
-      dragon.timer--;
-      if (dragon.timer <= 0) {
-        dragon.active = true;
-        dragon.x = W + 120;
-        dragon.y = 30 + Math.random() * 70;
-        dragon.speed = 3.5 + Math.random() * 1.5;
-        dragon.frame = 0;
-      }
-    } else {
-      dragon.frame++;
-      dragon.x -= dragon.speed;
-      dragon.y += Math.sin(dragon.frame * 0.08) * 1.6;
+    if (score < PHASE_3_SCORE) {
+      if (!dragon.active) {
+        dragon.timer--;
+        if (dragon.timer <= 0) {
+          dragon.active = true;
+          dragon.x = W + 120;
+          dragon.y = 30 + Math.random() * 70;
+          dragon.speed = 3.5 + Math.random() * 1.5;
+          dragon.frame = 0;
+        }
+      } else {
+        dragon.frame++;
+        dragon.x -= dragon.speed;
+        dragon.y += Math.sin(dragon.frame * 0.08) * 1.6;
 
-      // Spawn fire particles
-      if (dragon.frame % 3 === 0) {
-        dragon.particles.push({
-          x: dragon.x - 10,
-          y: dragon.y + 6,
-          vx: -(1 + Math.random() * 1.5),
-          vy: (Math.random() - 0.5) * 1.2,
-          size: 3.5 + Math.random() * 3.5,
-          alpha: 1,
-        });
+        // Spawn fire particles
+        if (dragon.frame % 3 === 0) {
+          dragon.particles.push({
+            x: dragon.x - 10,
+            y: dragon.y + 6,
+            vx: -(1 + Math.random() * 1.5),
+            vy: (Math.random() - 0.5) * 1.2,
+            size: 3.5 + Math.random() * 3.5,
+            alpha: 1,
+          });
+        }
+
+        if (dragon.x < -150) {
+          dragon.active = false;
+          dragon.timer = 600 + Math.random() * 300;
+        }
       }
 
-      if (dragon.x < -150) {
-        dragon.active = false;
-        dragon.timer = 600 + Math.random() * 300;
-      }
-    }
-
-    // Update fire particles
-    for (let i = dragon.particles.length - 1; i >= 0; i--) {
-      const p = dragon.particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= 0.022;
-      if (p.alpha <= 0) {
-        dragon.particles.splice(i, 1);
+      // Update fire particles
+      for (let i = dragon.particles.length - 1; i >= 0; i--) {
+        const p = dragon.particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.alpha -= 0.022;
+        if (p.alpha <= 0) {
+          dragon.particles.splice(i, 1);
+        }
       }
     }
 
     // 6. UFO (Easter egg)
-    if (score >= CLIMATE_COSMIC_START) {
+    if (score >= PHASE_2_SCORE) {
       if (!ufo.active) {
         ufo.timer--;
         if (ufo.timer <= 0) {
@@ -356,19 +388,177 @@ nebCtx.fill();
     }
   }
 
+  let transitionDone = false;
+
+  function triggerUfoTransition() {
+    state = "transition";
+    downHeld = false;
+    if (digBtn) digBtn.classList.add("hidden");
+    
+    ufo.active = true;
+    ufo.state = "rescue-fly-in";
+    ufo.x = W + 80;
+    ufo.y = 80;
+    ufo.beamProgress = 0;
+    ufo.beamOpacity = 0;
+    ufo.rescueStage = "fly-in"; // fly-in | hover-beam | float-up | fly-out | done
+    ufo.rescueT = 0;
+  }
+
+  function updateUfoTransition() {
+    // 1. Slow down general speed and stop ground movement eventually
+    if (speed > 0) speed = Math.max(0, speed - 0.08);
+    groundOffset = (groundOffset + speed) % 24;
+
+    // 2. Update existing obstacles scrolling off-screen
+    environment.logs.forEach(l => l.x -= speed);
+    environment.rocks.forEach(r => r.x -= speed);
+    environment.rivers.forEach(r => r.x -= speed);
+    environment.bananas.forEach(b => b.x -= speed);
+    environment.powerups.forEach(p => p.x -= speed);
+
+    // 3. Move hunter off-screen to the left (surprised!)
+    if (hunter.gap < HUNTER_MAX_GAP + 200) {
+      hunter.gap += 4; // Hunter gets left behind
+    }
+    hunterFillEl.style.width = "0%";
+    hunterMeterEl.classList.remove("critical");
+
+    // 4. Align player to center of the screen
+    const targetX = W / 2 - player.w / 2;
+    if (player.x < targetX - 2) player.x += 2;
+    else if (player.x > targetX + 2) player.x -= 2;
+    else player.x = targetX;
+
+    if (player.swinging) {
+      player.swinging = false;
+      player.jumping = true;
+    }
+    if (player.y < GROUND_Y - player.h && ufo.rescueStage !== "float-up" && ufo.rescueStage !== "fly-out") {
+      player.y = Math.min(GROUND_Y - player.h, player.y + 4);
+    }
+
+    // 5. Orchestrate UFO rescue
+    if (ufo.rescueStage === "fly-in") {
+      ufo.active = true;
+      const targetUfoX = W / 2;
+      const targetUfoY = 70;
+      ufo.x -= (ufo.x - targetUfoX) * 0.07;
+      ufo.y -= (ufo.y - targetUfoY) * 0.07;
+      if (Math.abs(ufo.x - targetUfoX) < 3 && Math.abs(ufo.y - targetUfoY) < 3) {
+        ufo.x = targetUfoX;
+        ufo.y = targetUfoY;
+        ufo.rescueStage = "hover-beam";
+        ufo.beamProgress = 0;
+      }
+    } else if (ufo.rescueStage === "hover-beam") {
+      ufo.beamProgress += 0.035;
+      ufo.beamOpacity = Math.min(0.7, ufo.beamProgress * 0.7);
+      if (ufo.beamProgress >= 1) {
+        ufo.rescueStage = "float-up";
+      }
+    } else if (ufo.rescueStage === "float-up") {
+      const targetGorillaY = ufo.y + 8;
+      player.y -= (player.y - targetGorillaY) * 0.04;
+      player.floatAngle = (player.floatAngle || 0) + 0.045;
+      
+      if (Math.abs(player.y - targetGorillaY) < 5) {
+        ufo.rescueStage = "fly-out";
+        ufo.beamProgress = 1;
+        player.invisible = true; // Gorilla enters the UFO
+      }
+    } else if (ufo.rescueStage === "fly-out") {
+      if (ufo.beamOpacity > 0) {
+        ufo.beamOpacity -= 0.06;
+      } else {
+        ufo.x += 7;
+        ufo.y -= 3.5;
+        if (ufo.x > W + 100) {
+          ufo.rescueStage = "done";
+          // End of transition, start phase 3
+          transitionDone = true;
+          state = "playing";
+          player.invisible = false;
+          player.y = -100; // Drops from ceiling into office
+          player.floatAngle = 0;
+          hunter.gap = HUNTER_MAX_GAP; // Hunter is far away again
+        }
+      }
+    }
+  }
+
+  let finalJumpProgress = 0;
+  function triggerVictory() {
+    state = "victory";
+    downHeld = false;
+    if (digBtn) digBtn.classList.add("hidden");
+    sfx.victory();
+    
+    if (score > highScore) {
+      highScore = score;
+      localStorage.setItem("monkeyGameHighScore", String(Math.floor(highScore)));
+      highscoreEl.textContent = `Recorde: ${Math.floor(highScore)}`;
+    }
+    
+    finalJumpProgress = 0;
+  }
+
+  function updateVictorySequence() {
+    if (speed > 0) speed = Math.max(0, speed - 0.08);
+    groundOffset = (groundOffset + speed) % 24;
+
+    environment.logs.forEach(l => l.x -= speed);
+    environment.rocks.forEach(r => r.x -= speed);
+    environment.rivers.forEach(r => r.x -= speed);
+    environment.bananas.forEach(b => b.x -= speed);
+    environment.powerups.forEach(p => p.x -= speed);
+
+    if (hunter.gap < HUNTER_MAX_GAP + 200) {
+      hunter.gap += 4;
+    }
+    hunterFillEl.style.width = "0%";
+    hunterMeterEl.classList.remove("critical");
+
+    // Gorilla runs to the right and jumps out the window
+    player.x += 3;
+    if (player.x > W - 150) {
+      // Jump
+      finalJumpProgress += 0.05;
+      player.y -= Math.sin(finalJumpProgress * Math.PI) * 10;
+      if (finalJumpProgress >= 1) {
+        showVictoryScreen();
+      }
+    }
+  }
+
+  function showVictoryScreen() {
+    state = "idle";
+    victoryScoreEl.textContent = `Pontos: ${Math.floor(score)} | 🍌 x ${bananaCount}`;
+    victoryScreen.classList.remove("hidden");
+  }
+
   function update() {
     frame++;
     speed = BASE_SPEED + score / 1000;
     updateBackgroundElements();
 
-    player.update(activeRock, frame, endGame, sfx);
+    if (state === "victory") {
+      updateVictorySequence();
+      return;
+    }
+    if (state === "transition") {
+      updateUfoTransition();
+      return;
+    }
+
+    player.update(activeRock, frame, handleDamage, sfx);
     if (state === "gameover") return;
 
     if (!activeRock) {
       groundOffset = (groundOffset + speed) % 24;
 
       // Update environment obstacles and check collisions
-      const collisionResult = environment.update(speed, score, player, hunter, sfx, endGame, triggerScreenShake);
+      const collisionResult = environment.update(speed, score, player, hunter, sfx, handleDamage, triggerScreenShake);
       if (state === "gameover") return;
 
       if (collisionResult && collisionResult.w && !collisionResult.type) {
@@ -385,6 +575,9 @@ nebCtx.fill();
         score += 15;
       } else if (collisionResult === "spring") {
         score += 15;
+      } else if (collisionResult === "heart") {
+        player.lives++;
+        score += 20;
       }
     }
 
@@ -396,8 +589,7 @@ nebCtx.fill();
         } else {
           rockGraceLeft--;
           if (rockGraceLeft <= 0) {
-            triggerScreenShake();
-            endGame("rock");
+            handleDamage("rock");
             return;
           }
         }
@@ -418,8 +610,7 @@ nebCtx.fill();
 
     hunter.update(player, environment.rivers, score, speed);
     if (hunter.gap <= 0) {
-      triggerScreenShake();
-      endGame("hunter");
+      handleDamage("hunter");
       return;
     }
 
@@ -429,7 +620,17 @@ nebCtx.fill();
 
     score += 0.15;
     scoreEl.textContent = `Pontos: ${Math.floor(score)}`;
-    bananasEl.textContent = `🍌 x ${bananaCount}`;
+    bananasEl.textContent = `❤️ x ${player.lives} | 🍌 x ${bananaCount}`;
+
+    if (score >= PHASE_3_SCORE && !transitionDone) {
+      triggerUfoTransition();
+      return;
+    }
+
+    if (score >= VICTORY_SCORE) {
+      triggerVictory();
+      return;
+    }
   }
 
   function draw() {
@@ -448,27 +649,18 @@ nebCtx.fill();
 
     // Determine target sky colors based on score
     let skyTop, skyBottom;
-    if (score < CLIMATE_SUNSET_START) {
+    if (score < PHASE_2_SCORE) {
+      // Fase 1: Selva
       skyTop = "#8fd3f4";
       skyBottom = "#dcf4ff";
-    } else if (score < CLIMATE_NIGHT_START) {
-      const range = CLIMATE_NIGHT_START - CLIMATE_SUNSET_START;
-      const f = (score - CLIMATE_SUNSET_START) / range;
-      if (f < 0.5) {
-        skyTop = lerpColor("#8fd3f4", "#ff7e5f", f * 2);
-        skyBottom = lerpColor("#dcf4ff", "#feb47b", f * 2);
-      } else {
-        skyTop = lerpColor("#ff7e5f", "#090715", (f - 0.5) * 2);
-        skyBottom = lerpColor("#feb47b", "#141130", (f - 0.5) * 2);
-      }
-    } else if (score < CLIMATE_COSMIC_START) {
-      const range = CLIMATE_COSMIC_START - CLIMATE_NIGHT_START;
-      const f = (score - CLIMATE_NIGHT_START) / range;
-      skyTop = lerpColor("#090715", "#020005", f);
-      skyBottom = lerpColor("#141130", "#080318", f);
+    } else if (score < PHASE_3_SCORE) {
+      // Fase 2: Marte
+      skyTop = "#4a0404";
+      skyBottom = "#b82e14";
     } else {
-      skyTop = "#020005";
-      skyBottom = "#080318";
+      // Fase 3: Escritório
+      skyTop = "#dcdcdc";
+      skyBottom = "#f0f0f0";
     }
 
     // Draw the sky gradient
@@ -479,18 +671,15 @@ nebCtx.fill();
     ctx.fillRect(0, 0, W, GROUND_Y);
 
     // Render Nebulae
-    if (score >= CLIMATE_NIGHT_START) {
-      const range = CLIMATE_COSMIC_START - CLIMATE_NIGHT_START;
-      const opacity = Math.min(0.35, ((score - CLIMATE_NIGHT_START) / range) * 0.35);
+    if (score >= PHASE_2_SCORE && score < PHASE_3_SCORE) {
       ctx.save();
-      ctx.globalAlpha = opacity;
+      ctx.globalAlpha = 0.35;
       ctx.drawImage(nebCanvas, 0, 0);
       ctx.restore();
     }
 
     // Render Stars
-    if (score >= CLIMATE_SUNSET_START) {
-      const maxOpacity = score < CLIMATE_NIGHT_START ? (score - CLIMATE_SUNSET_START) / (CLIMATE_NIGHT_START - CLIMATE_SUNSET_START) : 1;
+    if (score >= PHASE_2_SCORE && score < PHASE_3_SCORE) {
       ctx.save();
       // Group stars into 3 batches to reduce draw calls from 90 to 3
       for (let g = 0; g < 3; g++) {
@@ -505,14 +694,14 @@ nebCtx.fill();
           ctx.rect(star.x - star.size / 2, star.y - star.size / 2, star.size, star.size);
         }
         const avgTwitch = count > 0 ? twitchSum / count : 1;
-        ctx.fillStyle = `rgba(255, 255, 255, ${avgTwitch * maxOpacity})`;
+        ctx.fillStyle = `rgba(255, 255, 255, ${avgTwitch})`;
         ctx.fill();
       }
       ctx.restore();
     }
 
     // Draw Constellation
-    if (score >= CLIMATE_NIGHT_START) {
+    if (score >= PHASE_2_SCORE && score < PHASE_3_SCORE) {
       const monkeyStars = [
         { x: W * 0.38, y: 40 },
         { x: W * 0.44, y: 25 },
@@ -547,7 +736,7 @@ nebCtx.fill();
     }
 
     // Render Shooting Stars
-    if (shootingStars.length > 0) {
+    if (score >= PHASE_2_SCORE && score < PHASE_3_SCORE && shootingStars.length > 0) {
       ctx.save();
       ctx.lineWidth = 1.5;
       for (const ss of shootingStars) {
@@ -569,10 +758,10 @@ nebCtx.fill();
     }
 
     // Render Sun
-    if (score < CLIMATE_NIGHT_START) {
+    if (score < PHASE_2_SCORE) {
       ctx.save();
-      const sunY = 55 + (score / CLIMATE_NIGHT_START) * (GROUND_Y - 90);
-      const sunColor = lerpColor("#8fd3f4", "#ff4500", Math.min(1, score / (CLIMATE_NIGHT_START - 200)));
+      const sunY = 55 + (score / PHASE_2_SCORE) * (GROUND_Y - 90);
+      const sunColor = "#ff4500";
 
       const sunGlow = ctx.createRadialGradient(W - 80, sunY, 4, W - 80, sunY, 32);
       sunGlow.addColorStop(0, sunColor);
@@ -585,30 +774,14 @@ nebCtx.fill();
       ctx.font = "32px serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(score < CLIMATE_SUNSET_START ? "☀️" : "🌅", W - 80, sunY);
-      ctx.restore();
-    }
-
-    // Render Moon
-    if (score >= CLIMATE_SUNSET_START) {
-      const maxMoonOpacity = Math.min(1, (score - CLIMATE_SUNSET_START) / (CLIMATE_NIGHT_START - CLIMATE_SUNSET_START));
-      ctx.save();
-      ctx.globalAlpha = maxMoonOpacity;
-      const moonY = 85 - ((score - CLIMATE_SUNSET_START) / CLIMATE_COSMIC_START) * 20;
-      ctx.shadowColor = "rgba(255, 255, 230, 0.4)";
-      ctx.shadowBlur = 10;
-      ctx.font = "34px serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("🌙", 90, moonY);
+      ctx.fillText("☀️", W - 80, sunY);
       ctx.restore();
     }
 
     // Render Planets
-    if (score >= CLIMATE_NIGHT_START) {
-      const maxPlanetOpacity = Math.min(0.9, (score - CLIMATE_NIGHT_START) / (CLIMATE_COSMIC_START - CLIMATE_NIGHT_START));
+    if (score >= PHASE_2_SCORE && score < PHASE_3_SCORE) {
       ctx.save();
-      ctx.globalAlpha = maxPlanetOpacity;
+      ctx.globalAlpha = 0.9;
       for (const p of planets) {
         if (p.rings) {
           ctx.strokeStyle = "rgba(235, 200, 120, 0.4)";
@@ -640,10 +813,9 @@ nebCtx.fill();
     }
 
     // Render Clouds
-    if (score < CLIMATE_NIGHT_START) {
-      const cloudOpacity = Math.max(0, 1 - (score - CLIMATE_SUNSET_START) / (CLIMATE_NIGHT_START - CLIMATE_SUNSET_START));
+    if (score < PHASE_2_SCORE) {
       ctx.save();
-      ctx.globalAlpha = cloudOpacity;
+      ctx.globalAlpha = 0.75;
       ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
       for (const cloud of clouds) {
         ctx.beginPath();
@@ -659,7 +831,7 @@ nebCtx.fill();
     }
 
     // Render Dragon
-    if (dragon.active) {
+    if (dragon.active && score < PHASE_3_SCORE) {
       ctx.save();
       for (const p of dragon.particles) {
         ctx.fillStyle = `rgba(255, ${80 + Math.floor(Math.random() * 100)}, 0, ${p.alpha})`;
@@ -675,7 +847,7 @@ nebCtx.fill();
     }
 
     // Render UFO
-    if (ufo.active) {
+    if (ufo.active && score >= PHASE_2_SCORE) {
       ctx.save();
       if (ufo.beamOpacity > 0) {
         const ufoBeam = ctx.createLinearGradient(0, ufo.y, 0, GROUND_Y);
@@ -698,7 +870,43 @@ nebCtx.fill();
     }
 
     // Draw environment & obstacles
-    environment.draw(ctx, frame, speed, activeRock, groundOffset);
+    environment.draw(ctx, frame, speed, activeRock, groundOffset, score);
+
+    // Draw final window in victory sequence
+    if (state === "victory") {
+      ctx.save();
+      const windowX = W - 100;
+      const windowY = GROUND_Y - 120;
+      
+      // Wall outline
+      ctx.fillStyle = "#bbbbbb";
+      ctx.fillRect(windowX - 10, windowY - 10, 100, 130);
+      
+      // Glass
+      ctx.fillStyle = "#87CEEB"; // Sky blue
+      ctx.fillRect(windowX, windowY, 80, 110);
+      
+      // Window frame
+      ctx.strokeStyle = "#444444";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(windowX, windowY, 80, 110);
+      ctx.beginPath();
+      ctx.moveTo(windowX + 40, windowY);
+      ctx.lineTo(windowX + 40, windowY + 110);
+      ctx.moveTo(windowX, windowY + 55);
+      ctx.lineTo(windowX + 80, windowY + 55);
+      ctx.stroke();
+
+      // Reflections
+      ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+      ctx.beginPath();
+      ctx.moveTo(windowX + 10, windowY + 90);
+      ctx.lineTo(windowX + 60, windowY + 10);
+      ctx.lineTo(windowX + 70, windowY + 10);
+      ctx.lineTo(windowX + 20, windowY + 90);
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Draw modular player & hunter
     if (player.digging) {
@@ -762,7 +970,7 @@ nebCtx.fill();
   }
 
   function loop() {
-    if (state !== "playing") return;
+    if (state !== "playing" && state !== "victory") return;
     update();
     draw();
     requestAnimationFrame(loop);
@@ -796,6 +1004,7 @@ nebCtx.fill();
 
   startBtn.addEventListener("click", startGame);
   restartBtn.addEventListener("click", startGame);
+  restartVictoryBtn.addEventListener("click", startGame);
 
 
 
