@@ -95,6 +95,10 @@
   const ROCK_DIG_DURATION = 55; // frames of held down-arrow needed to dig all the way under a rock
   const ROCK_DIG_DEPTH = 30; // px the monkey sinks into the ground while digging
 
+  const CLIMATE_SUNSET_START = 800;
+  const CLIMATE_NIGHT_START = 2000;
+  const CLIMATE_COSMIC_START = 3500;
+
   let highScore = Number(localStorage.getItem("monkeyGameHighScore") || 0);
   highscoreEl.textContent = `Recorde: ${highScore}`;
 
@@ -104,6 +108,68 @@
   let hunterGap, gameOverReason, hunterSwimming, hunterSwimFramesLeft, lastSwingTapFrame;
   let activeRock, rockGraceLeft, digProgress, groundOffset;
   let downHeld = false; // tracks the down-arrow being held, needed for the dig-to-clear-a-rock mechanic
+
+  // Background weather/time dynamic elements
+  let clouds = [], stars = [], shootingStars = [], planets = [], dragon = {}, ufo = {};
+
+  function lerpColor(c1, c2, factor) {
+    const parse = (hex) => {
+      let h = hex.replace("#", "");
+      if (h.length === 3) h = h.split("").map(x => x + x).join("");
+      return {
+        r: parseInt(h.slice(0, 2), 16),
+        g: parseInt(h.slice(2, 4), 16),
+        b: parseInt(h.slice(4, 6), 16)
+      };
+    };
+    const rgb1 = parse(c1);
+    const rgb2 = parse(c2);
+    const r = Math.round(rgb1.r + (rgb2.r - rgb1.r) * factor);
+    const g = Math.round(rgb1.g + (rgb2.g - rgb1.g) * factor);
+    const b = Math.round(rgb1.b + (rgb2.b - rgb1.b) * factor);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  function initBackgroundElements() {
+    clouds = [
+      { x: 100, y: 50, speed: 0.15, scale: 0.8 },
+      { x: 350, y: 80, speed: 0.22, scale: 1.1 },
+      { x: 600, y: 40, speed: 0.1, scale: 0.6 },
+    ];
+    stars = [];
+    for (let i = 0; i < 90; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * (GROUND_Y - 40),
+        size: 0.5 + Math.random() * 1.8,
+        twinkleSpeed: 0.015 + Math.random() * 0.045,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+    shootingStars = [];
+    planets = [
+      { x: W - 150, y: 70, r: 16, color: "#e06c53", name: "mars", speed: 0.02 },
+      { x: 220, y: 110, r: 22, color: "#d9ab55", name: "saturn", rings: true, speed: 0.015 },
+      { x: 450, y: 50, r: 12, color: "#55d9bb", name: "emerald", speed: 0.01 },
+    ];
+    dragon = {
+      x: -120,
+      y: 60,
+      active: false,
+      timer: 500, // frame-counter to spawn
+      particles: [],
+      frame: 0
+    };
+    ufo = {
+      x: -100,
+      y: 40,
+      active: false,
+      timer: 800,
+      beamProgress: 0,
+      state: "fly-in",
+      beamOpacity: 0
+    };
+  }
 
   function resetGame() {
     monkey = {
@@ -141,6 +207,7 @@
     gameOverReason = null;
     hunterMeterEl.classList.remove("critical");
     hunterFillEl.style.width = "0%";
+    initBackgroundElements();
   }
 
   function jump() {
@@ -245,9 +312,134 @@
     );
   }
 
+  function updateBackgroundElements() {
+    // 1. Clouds
+    for (const cloud of clouds) {
+      cloud.x -= cloud.speed * (speed * 0.5);
+      if (cloud.x + 120 * cloud.scale < 0) {
+        cloud.x = W + 50;
+        cloud.y = 30 + Math.random() * 60;
+      }
+    }
+
+    // 2. Stars (twinkle phase)
+    for (const star of stars) {
+      star.phase += star.twinkleSpeed;
+    }
+
+    // 3. Shooting stars
+    if (score >= CLIMATE_SUNSET_START && Math.random() < 0.008 && shootingStars.length < 2) {
+      shootingStars.push({
+        x: Math.random() * (W - 100),
+        y: Math.random() * 80,
+        length: 40 + Math.random() * 40,
+        speed: 8 + Math.random() * 6,
+        progress: 0,
+        angle: Math.PI / 6 + Math.random() * (Math.PI / 12),
+      });
+    }
+    for (let i = shootingStars.length - 1; i >= 0; i--) {
+      const ss = shootingStars[i];
+      ss.progress += ss.speed;
+      if (ss.progress > ss.length + 100) {
+        shootingStars.splice(i, 1);
+      }
+    }
+
+    // 4. Planets
+    for (const planet of planets) {
+      planet.x -= planet.speed * (speed * 0.2);
+      if (planet.x + 50 < 0) {
+        planet.x = W + 100;
+        planet.y = 40 + Math.random() * 100;
+      }
+    }
+
+    // 5. Dragon (Easter egg)
+    if (!dragon.active) {
+      dragon.timer--;
+      if (dragon.timer <= 0) {
+        dragon.active = true;
+        dragon.x = W + 120;
+        dragon.y = 30 + Math.random() * 70;
+        dragon.speed = 3.5 + Math.random() * 1.5;
+        dragon.frame = 0;
+      }
+    } else {
+      dragon.frame++;
+      dragon.x -= dragon.speed;
+      dragon.y += Math.sin(dragon.frame * 0.08) * 1.6;
+
+      // Spawn fire particles
+      if (dragon.frame % 3 === 0) {
+        dragon.particles.push({
+          x: dragon.x - 10,
+          y: dragon.y + 6,
+          vx: -(1 + Math.random() * 1.5),
+          vy: (Math.random() - 0.5) * 1.2,
+          size: 3.5 + Math.random() * 3.5,
+          alpha: 1,
+        });
+      }
+
+      if (dragon.x < -150) {
+        dragon.active = false;
+        dragon.timer = 600 + Math.random() * 300;
+      }
+    }
+
+    // Update fire particles
+    for (let i = dragon.particles.length - 1; i >= 0; i--) {
+      const p = dragon.particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= 0.022;
+      if (p.alpha <= 0) {
+        dragon.particles.splice(i, 1);
+      }
+    }
+
+    // 6. UFO (Easter egg)
+    if (score >= CLIMATE_COSMIC_START) {
+      if (!ufo.active) {
+        ufo.timer--;
+        if (ufo.timer <= 0) {
+          ufo.active = true;
+          ufo.x = W + 100;
+          ufo.y = 30 + Math.random() * 40;
+          ufo.speed = 2.5;
+          ufo.state = "fly-in";
+          ufo.beamProgress = 0;
+          ufo.beamOpacity = 0;
+        }
+      } else {
+        if (ufo.state === "fly-in") {
+          ufo.x -= ufo.speed;
+          if (ufo.x <= W / 2) {
+            ufo.state = "hover";
+            ufo.beamProgress = 0;
+          }
+        } else if (ufo.state === "hover") {
+          ufo.beamProgress += 0.015;
+          ufo.beamOpacity = Math.sin(ufo.beamProgress * Math.PI) * 0.45;
+          if (ufo.beamProgress >= 1) {
+            ufo.state = "fly-out";
+          }
+        } else if (ufo.state === "fly-out") {
+          ufo.x -= ufo.speed * 1.6;
+          if (ufo.x < -100) {
+            ufo.active = false;
+            ufo.timer = 800 + Math.random() * 400;
+          }
+        }
+      }
+    }
+  }
+
   function update() {
     frame++;
-    speed = BASE_SPEED + score / 400;
+    speed = BASE_SPEED + score / 1000;
+    updateBackgroundElements();
 
     // monkey physics: normal gravity, or a scripted arc while swinging on a vine
     if (monkey.swinging) {
@@ -781,9 +973,270 @@
 
     if (digBtn) digBtn.classList.toggle("hidden", !(state === "playing" && activeRock));
 
-    // sky gradient already via CSS; draw sun
-    ctx.font = "40px serif";
-    ctx.fillText("☀️", W - 80, 60);
+    // Determine target sky colors based on score
+    let skyTop, skyBottom;
+    if (score < CLIMATE_SUNSET_START) {
+      // Day
+      skyTop = "#8fd3f4";
+      skyBottom = "#dcf4ff";
+    } else if (score < CLIMATE_NIGHT_START) {
+      // Day -> Sunset -> Night
+      const range = CLIMATE_NIGHT_START - CLIMATE_SUNSET_START;
+      const f = (score - CLIMATE_SUNSET_START) / range;
+      if (f < 0.5) {
+        // Day to Sunset
+        skyTop = lerpColor("#8fd3f4", "#ff7e5f", f * 2);
+        skyBottom = lerpColor("#dcf4ff", "#feb47b", f * 2);
+      } else {
+        // Sunset to Night
+        skyTop = lerpColor("#ff7e5f", "#090715", (f - 0.5) * 2);
+        skyBottom = lerpColor("#feb47b", "#141130", (f - 0.5) * 2);
+      }
+    } else if (score < CLIMATE_COSMIC_START) {
+      // Night -> Cosmic
+      const range = CLIMATE_COSMIC_START - CLIMATE_NIGHT_START;
+      const f = (score - CLIMATE_NIGHT_START) / range;
+      skyTop = lerpColor("#090715", "#020005", f);
+      skyBottom = lerpColor("#141130", "#080318", f);
+    } else {
+      // Cosmic
+      skyTop = "#020005";
+      skyBottom = "#080318";
+    }
+
+    // Draw the sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    skyGrad.addColorStop(0, skyTop);
+    skyGrad.addColorStop(1, skyBottom);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, GROUND_Y);
+
+    // Render Nebulae (for cosmic phase)
+    if (score >= CLIMATE_NIGHT_START) {
+      const range = CLIMATE_COSMIC_START - CLIMATE_NIGHT_START;
+      const opacity = Math.min(0.35, ((score - CLIMATE_NIGHT_START) / range) * 0.35);
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+
+      // Pink nebula
+      const pinkNeb = ctx.createRadialGradient(W * 0.3, 80, 10, W * 0.3, 80, 140);
+      pinkNeb.addColorStop(0, `rgba(255, 0, 128, ${opacity})`);
+      pinkNeb.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = pinkNeb;
+      ctx.beginPath();
+      ctx.arc(W * 0.3, 80, 140, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Blue nebula
+      const blueNeb = ctx.createRadialGradient(W * 0.7, 60, 20, W * 0.7, 60, 160);
+      blueNeb.addColorStop(0, `rgba(0, 128, 255, ${opacity})`);
+      blueNeb.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = blueNeb;
+      ctx.beginPath();
+      ctx.arc(W * 0.7, 60, 160, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Render Stars & Twinkle
+    if (score >= CLIMATE_SUNSET_START) {
+      const maxOpacity = score < CLIMATE_NIGHT_START ? (score - CLIMATE_SUNSET_START) / (CLIMATE_NIGHT_START - CLIMATE_SUNSET_START) : 1;
+      ctx.save();
+      for (const star of stars) {
+        const twitch = Math.sin(frame * star.twinkleSpeed + star.phase) * 0.38 + 0.62;
+        ctx.fillStyle = `rgba(255, 255, 255, ${star.size > 1.3 ? twitch * maxOpacity : maxOpacity * 0.55})`;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.size * (star.size > 1.3 ? twitch : 1), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Draw Constellation of the Monkey (hidden easter egg at night/cosmic)
+    if (score >= CLIMATE_NIGHT_START) {
+      const monkeyStars = [
+        { x: W * 0.38, y: 40 },
+        { x: W * 0.44, y: 25 },
+        { x: W * 0.50, y: 28 },
+        { x: W * 0.53, y: 50 },
+        { x: W * 0.47, y: 65 },
+        { x: W * 0.41, y: 55 },
+        { x: W * 0.38, y: 40 }
+      ];
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(monkeyStars[0].x, monkeyStars[0].y);
+      for (let i = 1; i < monkeyStars.length; i++) {
+        ctx.lineTo(monkeyStars[i].x, monkeyStars[i].y);
+      }
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+      for (const s of monkeyStars) {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.font = "8px monospace";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.16)";
+      ctx.textAlign = "center";
+      ctx.fillText("Constelação Primata 🐵", W * 0.45, 80);
+      ctx.restore();
+    }
+
+    // Render Shooting Stars
+    if (shootingStars.length > 0) {
+      ctx.save();
+      ctx.lineWidth = 1.5;
+      for (const ss of shootingStars) {
+        const tailX = ss.x - Math.cos(ss.angle) * ss.progress;
+        const tailY = ss.y + Math.sin(ss.angle) * ss.progress;
+        const headX = ss.x - Math.cos(ss.angle) * (ss.progress - ss.length);
+        const headY = ss.y + Math.sin(ss.angle) * (ss.progress - ss.length);
+
+        const sgrad = ctx.createLinearGradient(tailX, tailY, headX, headY);
+        sgrad.addColorStop(0, "rgba(255, 255, 255, 0)");
+        sgrad.addColorStop(1, "rgba(255, 255, 255, 0.75)");
+        ctx.strokeStyle = sgrad;
+        ctx.beginPath();
+        ctx.moveTo(tailX, tailY);
+        ctx.lineTo(headX, headY);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Render Sun
+    if (score < CLIMATE_NIGHT_START) {
+      ctx.save();
+      const sunY = 55 + (score / CLIMATE_NIGHT_START) * (GROUND_Y - 90);
+      const sunColor = lerpColor("#8fd3f4", "#ff4500", Math.min(1, score / (CLIMATE_NIGHT_START - 200)));
+
+      const sunGlow = ctx.createRadialGradient(W - 80, sunY, 4, W - 80, sunY, 32);
+      sunGlow.addColorStop(0, sunColor);
+      sunGlow.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = sunGlow;
+      ctx.beginPath();
+      ctx.arc(W - 80, sunY, 32, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.font = "32px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(score < CLIMATE_SUNSET_START ? "☀️" : "🌅", W - 80, sunY);
+      ctx.restore();
+    }
+
+    // Render Crescent Moon
+    if (score >= CLIMATE_SUNSET_START) {
+      const maxMoonOpacity = Math.min(1, (score - CLIMATE_SUNSET_START) / (CLIMATE_NIGHT_START - CLIMATE_SUNSET_START));
+      ctx.save();
+      ctx.globalAlpha = maxMoonOpacity;
+      const moonY = 85 - ((score - CLIMATE_SUNSET_START) / CLIMATE_COSMIC_START) * 20;
+      ctx.shadowColor = "rgba(255, 255, 230, 0.4)";
+      ctx.shadowBlur = 10;
+      ctx.font = "34px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("🌙", 90, moonY);
+      ctx.restore();
+    }
+
+    // Render Planets
+    if (score >= CLIMATE_NIGHT_START) {
+      const maxPlanetOpacity = Math.min(0.9, (score - CLIMATE_NIGHT_START) / (CLIMATE_COSMIC_START - CLIMATE_NIGHT_START));
+      ctx.save();
+      ctx.globalAlpha = maxPlanetOpacity;
+      for (const p of planets) {
+        if (p.rings) {
+          ctx.strokeStyle = "rgba(235, 200, 120, 0.4)";
+          ctx.lineWidth = 3.5;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.scale(2, 0.45);
+          ctx.rotate(-Math.PI / 12);
+          ctx.beginPath();
+          ctx.arc(0, 0, p.r + 6, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        const shad = ctx.createRadialGradient(p.x - p.r / 3, p.y - p.r / 3, 1, p.x, p.y, p.r);
+        shad.addColorStop(0, "rgba(255, 255, 255, 0.12)");
+        shad.addColorStop(1, "rgba(0, 0, 0, 0.45)");
+        ctx.fillStyle = shad;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Render Clouds
+    if (score < CLIMATE_NIGHT_START) {
+      const cloudOpacity = Math.max(0, 1 - (score - CLIMATE_SUNSET_START) / (CLIMATE_NIGHT_START - CLIMATE_SUNSET_START));
+      ctx.save();
+      ctx.globalAlpha = cloudOpacity;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+      for (const cloud of clouds) {
+        ctx.beginPath();
+        const cx = cloud.x;
+        const cy = cloud.y;
+        const cs = cloud.scale;
+        ctx.arc(cx, cy, 14 * cs, 0, Math.PI * 2);
+        ctx.arc(cx + 14 * cs, cy - 7 * cs, 17 * cs, 0, Math.PI * 2);
+        ctx.arc(cx + 28 * cs, cy, 14 * cs, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Render Dragon & fire particles
+    if (dragon.active) {
+      ctx.save();
+      for (const p of dragon.particles) {
+        ctx.fillStyle = `rgba(255, ${80 + Math.floor(Math.random() * 100)}, 0, ${p.alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.font = "32px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("🐉", dragon.x, dragon.y);
+      ctx.restore();
+    }
+
+    // Render UFO
+    if (ufo.active) {
+      ctx.save();
+      if (ufo.beamOpacity > 0) {
+        const ufoBeam = ctx.createLinearGradient(0, ufo.y, 0, GROUND_Y);
+        ufoBeam.addColorStop(0, `rgba(100, 255, 100, ${ufo.beamOpacity})`);
+        ufoBeam.addColorStop(1, "rgba(100, 255, 100, 0)");
+        ctx.fillStyle = ufoBeam;
+        ctx.beginPath();
+        ctx.moveTo(ufo.x - 8, ufo.y + 10);
+        ctx.lineTo(ufo.x + 8, ufo.y + 10);
+        ctx.lineTo(ufo.x + 36, GROUND_Y);
+        ctx.lineTo(ufo.x - 36, GROUND_Y);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.font = "28px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("🛸", ufo.x, ufo.y);
+      ctx.restore();
+    }
 
     // ground
     ctx.fillStyle = "#7a9e4f";
