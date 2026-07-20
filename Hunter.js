@@ -1,4 +1,4 @@
-import { W, H, GROUND_Y, HUNTER_MAX_GAP, HUNTER_SWIM_PENALTY } from "./Config.js";
+import { W, GROUND_Y, HUNTER_MAX_GAP, HUNTER_SWIM_PENALTY, FREEZE_DURATION } from "./Config.js";
 import { drawSoftShadow, drawLittleHand, shadeColor } from "./Helpers.js";
 
 export class Hunter {
@@ -14,10 +14,27 @@ export class Hunter {
     // Adaptive AI
     this.sprintTimer = 0;
     this.maxGapFrames = 0;
+    this.frozenTimer = 0;
   }
 
-  update(monkey, rivers, score, speed) {
+  freeze() {
+    this.frozenTimer = FREEZE_DURATION;
+    // Cancela um sprint em andamento — senão o gelo daria a impressão de não
+    // ter funcionado assim que o efeito passasse.
+    this.sprintTimer = 0;
+    this.maxGapFrames = 0;
+  }
+
+  update(monkey, rivers, score, speed, phaseMul = 1) {
     const hunterX = monkey.x - this.gap;
+
+    if (this.frozenTimer > 0) {
+      this.frozenTimer--;
+      this.swimming = false;
+      // Congelado ele fica parado no mundo, então o cenário rolando o afasta.
+      this.gap = Math.min(HUNTER_MAX_GAP, this.gap + speed * 0.22);
+      return;
+    }
 
     // Swimming logic
     if (this.swimFramesLeft > 0) {
@@ -36,7 +53,7 @@ export class Hunter {
     }
 
     // Adaptive AI Speed logic
-    let baseClosingSpeed = 0.16 + score / 2200;
+    let baseClosingSpeed = (0.16 + score / 2600) * phaseMul;
 
     // Sprint when player is at HUNTER_MAX_GAP for too long (10 seconds)
     if (this.gap >= HUNTER_MAX_GAP) {
@@ -104,7 +121,7 @@ export class Hunter {
     }
   }
 
-  draw(ctx, monkey, frameNum) {
+  draw(ctx, monkey, frameNum, phaseIdx = 0) {
     const hx = monkey.x - this.gap;
     if (hx < -60 || hx > W + 60) return;
     const swing = Math.sin(frameNum * 0.35);
@@ -211,8 +228,52 @@ export class Hunter {
     this.drawNet(ctx, netHandX, netHandY);
     drawLittleHand(ctx, netHandX, netHandY, SKIN, OUTLINE);
 
-    // Sprint indicators (red angry lines `💢` when sprinting)
-    if (this.sprintTimer > 0) {
+    // No espaço ele improvisa um capacete — não ia largar a caçada por causa
+    // de um detalhe como a falta de atmosfera.
+    if (phaseIdx === 3) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(180, 230, 255, 0.85)";
+      ctx.fillStyle = "rgba(150, 215, 255, 0.2)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, headY - 2, 17, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, headY - 2, 13, Math.PI * 1.15, Math.PI * 1.45);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Bloco de gelo quando congelado.
+    if (this.frozenTimer > 0) {
+      ctx.save();
+      ctx.fillStyle = "rgba(150, 225, 255, 0.35)";
+      ctx.strokeStyle = "rgba(210, 245, 255, 0.8)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-20, 2);
+      ctx.lineTo(-16, headY - 16);
+      ctx.lineTo(16, headY - 18);
+      ctx.lineTo(21, 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // brilhos internos
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-9, -2); ctx.lineTo(-3, headY - 10);
+      ctx.moveTo(10, 0); ctx.lineTo(5, headY - 12);
+      ctx.stroke();
+      ctx.font = "13px serif";
+      ctx.textAlign = "center";
+      ctx.fillText("🧊", 0, headY - 24);
+      ctx.restore();
+    } else if (this.sprintTimer > 0) {
+      // Sprint indicators (red angry lines `💢` when sprinting)
       ctx.font = "14px Arial";
       ctx.fillStyle = "#d9342b";
       ctx.textAlign = "center";
