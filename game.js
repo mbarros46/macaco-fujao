@@ -605,8 +605,22 @@ function updateHud() {
 // ---------------------------------------------------------------------------
 // Update
 // ---------------------------------------------------------------------------
+// Efeitos puramente visuais, mas que precisam avançar no `update` e não no
+// `draw`: mantê-los no desenho fazia com que qualquer quadro não desenhado
+// (aba oculta, engasgo do navegador) deixasse o banner e o clarão presos na
+// tela para sempre.
+function tickEffects() {
+  if (shakeTime > 0) shakeTime--;
+  if (flashAlpha > 0) flashAlpha = Math.max(0, flashAlpha - 0.035);
+  if (banner) {
+    banner.t++;
+    if (banner.t > banner.life) banner = null;
+  }
+}
+
 function update() {
   frame++;
+  tickEffects();
 
   if (state === "transition") {
     theme = computeTheme(score, { from: 2, to: 3, t: transitionBlend() });
@@ -738,7 +752,6 @@ function update() {
 function draw() {
   ctx.save();
   if (shakeTime > 0) {
-    shakeTime--;
     ctx.translate((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8);
   }
 
@@ -823,7 +836,6 @@ function draw() {
   if (flashAlpha > 0) {
     ctx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
     ctx.fillRect(0, 0, W, H);
-    flashAlpha = Math.max(0, flashAlpha - 0.035);
   }
 
   ctx.restore();
@@ -897,12 +909,6 @@ function drawPowerStrip(ctx) {
 
 function drawBanner(ctx) {
   if (!banner) return;
-  banner.t++;
-  if (banner.t > banner.life) {
-    banner = null;
-    return;
-  }
-
   // Fade in nos primeiros 20 quadros, fade out nos últimos 40.
   const fadeIn = Math.min(1, banner.t / 20);
   const fadeOut = Math.min(1, (banner.life - banner.t) / 40);
@@ -1001,7 +1007,7 @@ if (["localhost", "127.0.0.1"].includes(location.hostname)) {
     },
     get world() {
       return {
-        fliers: environment.fliers.map((f) => f.icon),
+        fliers: environment.fliers.map((f) => ({ icon: f.icon, x: Math.round(f.x), y: f.y, w: f.w, h: f.h })),
         frozen: hunter.frozenTimer,
         gap: Math.round(hunter.gap),
         icons: { log: theme.logIcon, rock: theme.rockIcon, flier: theme.flierIcon },

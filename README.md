@@ -50,8 +50,8 @@ esquerda.
 
 - **Altos** (troncos 🪵, cactos 🌵, ossadas 🦴, meteoros ☄️): **pule**.
 - **Voadores** (araras 🦜, abutres 🦅, morcegos 🦇, satélites 🛰️): voam na
-  altura da cabeça. Não adianta pular — pular também acerta. **Abaixe.**
-  Aparecem a partir da fase 2, para a primeira fase ensinar pulo e cipó antes.
+  altura da cabeça e vêm com um selo **"↓ ABAIXE"** enquanto se aproximam. Não
+  adianta pular — pular também acerta. Aparecem a partir da metade da fase 1.
 - **Rochas** (🪨 🗿 🌑): não dá para pular. Pare em frente e **segure ↓** para
   cavar. Você tem uma pequena carência antes de bater nela.
 - **Rios, areia movediça, lava e fendas**: largos demais para um pulo. Pule

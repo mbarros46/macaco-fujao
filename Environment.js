@@ -171,8 +171,11 @@ export class Environment {
     // aprender pulo e cipó antes de precisar do agachamento.
     this.flierTimer--;
     if (this.flierTimer <= 0) {
-      if (theme.idx === 0) {
-        this.flierTimer = 240;
+      // Na primeira metade da fase 1 não aparecem: o jogador ainda está
+      // aprendendo pulo e cipó. Depois disso já entram, para a mecânica de
+      // agachar ser apresentada cedo em vez de só na fase 2.
+      if (theme.idx === 0 && score < 250) {
+        this.flierTimer = 120;
       } else {
         // Não pode coincidir com uma rocha (que obriga a parar e cavar) nem com
         // um rio (onde o jogador está pendurado e sem controle de altura).
@@ -384,15 +387,51 @@ export class Environment {
     // 5. Voadores
     for (const f of this.fliers) {
       ctx.save();
-      ctx.translate(f.x + f.w / 2, f.y + f.h / 2 + Math.sin(frame * 0.12 + f.phase) * 3);
-      ctx.font = `${f.h + 8}px serif`;
+      // Desenhado exatamente sobre a caixa de colisão. Antes havia um balanço
+      // vertical (`sin`) só no desenho: o bicho aparecia alguns pixels acima ou
+      // abaixo de onde realmente colidia, e o jogador agachado via o bicho
+      // encostar nele sem tomar dano — parecia bug porque era.
+      ctx.translate(f.x + f.w / 2, f.y + f.h / 2);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(f.icon, 0, 0);
-      // Seta de aviso indicando que a saída é abaixar.
-      ctx.font = "11px sans-serif";
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.fillText("⬇", 0, f.h / 2 + 9);
+
+      // Halo claro atrás do bicho. Um fundo escuro seria pior: a águia e o
+      // morcego já são escuros e sumiriam dentro dele. O halo claro destaca
+      // tanto os ícones escuros quanto os coloridos, em qualquer cenário.
+      const halo = ctx.createRadialGradient(0, 0, 2, 0, 0, f.w * 0.6);
+      halo.addColorStop(0, "rgba(255, 255, 255, 0.65)");
+      halo.addColorStop(0.6, "rgba(255, 255, 255, 0.3)");
+      halo.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(0, 0, f.w * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fonte limitada à altura da caixa: o ícone não transborda para a faixa
+      // de quem está agachado, então o que se vê é o que colide.
+      ctx.font = `${f.h}px serif`;
+      ctx.fillText(f.icon, 0, 1);
+      ctx.restore();
+    }
+
+    // Aviso de "abaixe!" enquanto o voador ainda está chegando. Fica acima
+    // dele, em céu aberto, onde dá para ler — e some quando ele chega perto,
+    // para não poluir bem na hora da ação.
+    for (const f of this.fliers) {
+      if (f.x < 190 || f.x > W - 40) continue;
+      const alpha = Math.min(1, (f.x - 190) / 90) * (0.55 + 0.45 * Math.sin(frame * 0.18));
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.translate(f.x + f.w / 2, f.y - 20);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      ctx.beginPath();
+      ctx.roundRect(-30, -10, 60, 19, 9);
+      ctx.fill();
+      ctx.font = "bold 11px 'Segoe UI', sans-serif";
+      ctx.fillStyle = "#ffe066";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("↓ ABAIXE", 0, 0);
       ctx.restore();
     }
 

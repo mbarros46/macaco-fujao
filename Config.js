@@ -27,8 +27,8 @@ export const FAST_FALL_MULT = 2.7;
 // pé (hitbox começa em GROUND_Y-34) e passar por cima de quem está agachado
 // (hitbox começa em GROUND_Y-17), com uma folga de ~9px de margem.
 export const FLIER_Y = GROUND_Y - 52;
-export const FLIER_H = 26;
-export const FLIER_W = 34;
+export const FLIER_H = 30;
+export const FLIER_W = 36;
 export const FLIER_SPEED_MUL = 1.25;
 export const FLIER_CLEARANCE = 180;
 

@@ -193,6 +193,39 @@ no loop principal.
     literalmente a palavra "undefined" na tela. Ao adicionar um campo novo de
     fase, ele precisa ser repassado nos **dois** lugares.
 
+16. **Correções na apresentação dos voadores** (reportado como "bugado, não
+    aparece direito"):
+
+    - *Desenho fora de sincronia com a colisão*: o bicho era desenhado com um
+      balanço vertical (`sin`) que **não existia na caixa de colisão**. Ele
+      aparecia alguns pixels acima ou abaixo de onde realmente acertava — quem
+      estava agachado via o bicho encostar sem tomar dano, e às vezes tomava
+      dano sem o bicho parecer ter encostado. Removido: agora desenho e colisão
+      ocupam exatamente a mesma caixa.
+    - *Ícone transbordando*: a fonte era `f.h + 8`, maior que a caixa, então o
+      ícone invadia visualmente a faixa de quem está agachado. Agora a fonte é
+      exatamente `f.h`.
+    - *Bicho sumindo no cenário*: sem nenhum destaque, a águia e o morcego
+      (escuros) desapareciam contra as dunas e a caldeira. A primeira tentativa
+      foi um fundo escuro, o que **piorou** — os ícones escuros sumiam dentro
+      dele. Trocado por um halo claro, que funciona tanto para ícones escuros
+      quanto coloridos, em qualquer fase.
+    - *Aviso ilegível*: o "⬇" de 11px em branco embaixo do bicho virava um
+      risquinho pálido que parecia sujeira de renderização. Virou um selo
+      "↓ ABAIXE" com fundo arredondado escuro, posicionado **acima** do bicho
+      (em céu aberto, onde dá para ler) e que some quando ele chega perto, para
+      não poluir na hora da ação.
+    - *Voadores só na fase 2*: nos primeiros ~35 segundos de jogo o jogador
+      nunca via um, o que passava a impressão de que a mecânica não funcionava.
+      Agora entram na segunda metade da fase 1 (a partir de 250 pontos).
+
+17. **Timers visuais saíram do `draw()`**. `shakeTime`, `flashAlpha` e o
+    contador do banner eram decrementados dentro da função de desenho. Isso é
+    estado de jogo mutando no caminho de renderização: qualquer quadro não
+    desenhado (aba em segundo plano, engasgo do navegador) deixava o clarão
+    branco e o banner de fase **presos na tela**. Movidos para `tickEffects()`,
+    chamado no início do `update()`; o `draw()` agora só lê.
+
 ## Próximos passos possíveis (não implementados)
 
 - Chefão no fim de cada fase.
